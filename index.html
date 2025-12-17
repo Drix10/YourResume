@@ -147,69 +147,86 @@
        */
 
       /* === PAGE BREAK CONTROL === */
-      /* Prevent breaks inside items */
-      .resume-item,
-      .education-item,
-      .experience-item,
-      .project-item {
-        page-break-inside: avoid !important;
-        break-inside: avoid !important;
-      }
-
-      /* Ensure section headers stay with content */
+      /* 
+       * STRATEGY: Allow content to split across pages to avoid blank space,
+       * but use orphan/widow controls to ensure clean breaks.
+       * Only prevent breaks for very short items (headers, single lines).
+       */
+      
+      /* Section headers must stay with at least some content */
       h2,
       h3 {
         page-break-after: avoid !important;
         break-after: avoid !important;
+        margin-bottom: 4pt !important;
       }
 
-      /* Keep bullet points together */
-      ul,
-      ol {
-        page-break-inside: avoid !important;
-        break-inside: avoid !important;
-      }
-
+      /* Individual bullet points should not split */
       li {
         page-break-inside: avoid !important;
         break-inside: avoid !important;
       }
 
-      /* === ORPHAN/WIDOW CONTROL === */
+      /* === ORPHAN/WIDOW CONTROL (CRITICAL FOR CLEAN BREAKS) === */
+      /* Ensure at least 2 lines at top/bottom of page breaks */
       p,
       li {
-        orphans: 3;
-        widows: 3;
+        orphans: 2;
+        widows: 2;
       }
 
-      /* === SECTION SPACING FOR CLEAN BREAKS === */
-      .resume-section {
-        page-break-inside: avoid !important;
-        break-inside: avoid !important;
-        margin-bottom: 8pt !important;
-      }
-
-      /* Allow breaks in large sections but keep items together */
-      .resume-section.allow-break {
+      /* Lists can split but keep individual items together */
+      ul,
+      ol {
         page-break-inside: auto !important;
         break-inside: auto !important;
       }
 
-      /* Ensure section headers stay with at least one item */
-      .resume-section > div:first-child {
+      /* === ITEM-LEVEL BREAK CONTROL === */
+      /* Small items (education entries) - try to keep together */
+      .education-item {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+
+      /* Larger items (experience, projects) - ALLOW splits to avoid blank space */
+      .experience-item,
+      .project-item,
+      .resume-item {
+        page-break-inside: auto !important;
+        break-inside: auto !important;
+      }
+
+      /* But keep the item header with at least first bullet */
+      .experience-item > div:first-child,
+      .project-item > div:first-child {
         page-break-after: avoid !important;
         break-after: avoid !important;
       }
 
-      /* Prefer page breaks before sections, not after */
+      /* === SECTION SPACING FOR CLEAN BREAKS === */
       .resume-section {
-        page-break-before: auto !important;
-        page-break-after: avoid !important;
+        page-break-inside: auto !important;
+        break-inside: auto !important;
+        margin-bottom: 8pt !important;
       }
 
-      /* Add spacing at top of new pages */
+      /* Section headers stay with first item */
+      .resume-section > h2:first-child,
+      .resume-section > h3:first-child {
+        page-break-after: avoid !important;
+        break-after: avoid !important;
+      }
+
+      /* Prefer page breaks before sections when needed */
       .resume-section {
-        padding-top: 0 !important;
+        page-break-before: auto !important;
+      }
+
+      /* Skills section is usually short - keep together */
+      .skills-section {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
       }
 
       /* === SMART FONT SIZING FOR DENSE RESUMES === */

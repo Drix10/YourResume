@@ -108,6 +108,13 @@ const isFileSafe = (filePath: string): boolean => {
 const sanitizeContent = (content: string, fileType: string): string => {
   if (!content) return '';
 
+  // Limit content size to prevent memory issues
+  const maxSize = 1024 * 1024; // 1MB max
+  if (content.length > maxSize) {
+    console.warn(`Content too large for sanitization (${content.length} bytes), truncating`);
+    content = content.slice(0, maxSize);
+  }
+
   // For package.json, only keep safe fields
   if (fileType === 'package.json') {
     try {
@@ -850,7 +857,7 @@ export const enrichRepoData = async (
         ...repo,
         enrichedData: {
           packageJson: packageData,
-          pythonDependencies: [...pythonDeps, ...setupPyDeps, ...pyprojectDeps],
+          pythonDependencies: [...new Set([...pythonDeps, ...setupPyDeps, ...pyprojectDeps])].slice(0, 200),
           commitCount: commitData.total,
           userCommitCount: commitData.userContributions,
           languages,
@@ -868,7 +875,7 @@ export const enrichRepoData = async (
           // ML/Data Science indicators
           isMLProject: notebookData.isML,
           isDataScience: notebookData.isDataScience,
-          // Combine all tech stack info from all ecosystems
+          // Combine all tech stack info from all ecosystems (limit to prevent memory issues)
           detectedTechnologies: [
             ...(packageData?.dependencies || []),
             ...(packageData?.devDependencies || []),
@@ -882,7 +889,7 @@ export const enrichRepoData = async (
             ...cppDeps,
             ...notebookData.imports,
             ...readmeData.mentions,
-          ].filter((v, i, a) => a.indexOf(v) === i), // Unique
+          ].filter((v, i, a) => a.indexOf(v) === i).slice(0, 200), // Unique, max 200
         },
       };
     } catch (error) {
@@ -914,13 +921,22 @@ export const validateToken = async (token: string): Promise<GitHubUser> => {
 
   let response: Response;
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
     response = await fetch(`${BASE_URL}/user`, {
       headers: {
         Authorization: `token ${trimmedToken}`,
         Accept: 'application/vnd.github.v3+json',
       },
+      signal: controller.signal,
     });
-  } catch (networkError) {
+
+    clearTimeout(timeoutId);
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      throw new Error('Request timed out. Please check your internet connection and try again.');
+    }
     throw new Error('Network error: Unable to connect to GitHub. Please check your internet connection.');
   }
 
@@ -956,14 +972,25 @@ export const fetchAllRepos = async (token: string, username: string): Promise<Gi
     let response: Response;
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout per page
+
       response = await fetch(`${BASE_URL}/user/repos?per_page=${perPage}&page=${page}&sort=updated&direction=desc`, {
         headers: {
           Authorization: `token ${trimmedToken}`,
           Accept: 'application/vnd.github.v3+json',
         },
+        signal: controller.signal,
       });
-    } catch (networkError) {
-      console.error("Network error fetching repos:", networkError);
+
+      clearTimeout(timeoutId);
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.warn(`Timeout fetching repos page ${page}`);
+        if (repos.length > 0) break; // Return what we have
+        throw new Error('Request timed out. Please try again.');
+      }
+      console.error("Network error fetching repos:", error);
       if (repos.length > 0) break; // Return what we have
       throw new Error('Network error: Unable to fetch repositories. Please check your internet connection.');
     }
@@ -989,12 +1016,18 @@ export const fetchAllRepos = async (token: string, username: string): Promise<Gi
       // Fallback to public only if /user/repos fails (likely due to scope)
       if (page === 1) {
         try {
+          const fallbackController = new AbortController();
+          const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), 15000);
+
           const publicResponse = await fetch(`${BASE_URL}/users/${trimmedUsername}/repos?per_page=${perPage}&page=${page}&sort=updated&direction=desc`, {
             headers: {
               Authorization: `token ${trimmedToken}`,
               Accept: 'application/vnd.github.v3+json',
             },
+            signal: fallbackController.signal,
           });
+
+          clearTimeout(fallbackTimeoutId);
 
           if (publicResponse.ok) {
             const data = await publicResponse.json();
@@ -1004,8 +1037,12 @@ export const fetchAllRepos = async (token: string, username: string): Promise<Gi
           } else {
             break;
           }
-        } catch (fallbackError) {
-          console.error("Error in fallback repo fetch:", fallbackError);
+        } catch (fallbackError: any) {
+          if (fallbackError.name === 'AbortError') {
+            console.warn("Timeout in fallback repo fetch");
+          } else {
+            console.error("Error in fallback repo fetch:", fallbackError);
+          }
           break;
         }
       } else {
