@@ -3,6 +3,191 @@ import { GITHUB_API } from '../constants';
 
 const BASE_URL = GITHUB_API.BASE_URL;
 
+// ============================================================================
+// SECURITY: File Safety Configuration
+// ============================================================================
+// WHITELIST: Only these specific files are allowed to be fetched
+// This prevents accidental exposure of sensitive data from private repos
+const SAFE_FILES_WHITELIST = new Set([
+  // Package managers (dependencies only, no secrets)
+  'package.json',
+  'requirements.txt',
+  'setup.py',
+  'pyproject.toml',
+  'go.mod',
+  'Cargo.toml',
+  'pom.xml',
+  'build.gradle',
+  'Gemfile',
+  'CMakeLists.txt',
+  // Documentation (public info)
+  'README.md',
+  'readme.md',
+  'README.rst',
+  'readme.rst',
+  // Notebooks (for ML detection - we only extract import statements)
+  'main.ipynb',
+  'notebook.ipynb',
+]);
+
+// BLOCKLIST: Patterns that should NEVER be fetched (defense in depth)
+const DANGEROUS_FILE_PATTERNS = [
+  /\.env/i,                    // Environment files
+  /\.secret/i,                 // Secret files
+  /secret/i,                   // Any file with "secret" in name
+  /credential/i,               // Credential files
+  /password/i,                 // Password files
+  /\.pem$/i,                   // SSL certificates
+  /\.key$/i,                   // Private keys
+  /\.p12$/i,                   // PKCS12 files
+  /\.pfx$/i,                   // PFX certificates
+  /\.jks$/i,                   // Java keystores
+  /id_rsa/i,                   // SSH keys
+  /id_dsa/i,                   // DSA keys
+  /id_ecdsa/i,                 // ECDSA keys
+  /id_ed25519/i,               // ED25519 keys
+  /\.ssh/i,                    // SSH directory
+  /authorized_keys/i,          // SSH authorized keys
+  /known_hosts/i,              // SSH known hosts
+  /\.aws/i,                    // AWS credentials
+  /\.gcp/i,                    // GCP credentials
+  /\.azure/i,                  // Azure credentials
+  /config\.json$/i,            // Config files (may contain secrets)
+  /settings\.json$/i,          // Settings files
+  /\.config$/i,                // Config files
+  /\.cfg$/i,                   // Config files
+  /\.ini$/i,                   // INI config files
+  /\.yaml$/i,                  // YAML configs (may contain secrets)
+  /\.yml$/i,                   // YML configs
+  /docker-compose/i,           // Docker compose (may have env vars)
+  /\.dockerignore/i,           // Docker ignore
+  /Dockerfile/i,               // Dockerfiles (may expose structure)
+  /\.git\//i,                  // Git internals
+  /\.gitconfig/i,              // Git config
+  /\.npmrc/i,                  // NPM config (may have tokens)
+  /\.pypirc/i,                 // PyPI config (may have tokens)
+  /\.netrc/i,                  // Netrc (credentials)
+  /\.htpasswd/i,               // Apache passwords
+  /\.htaccess/i,               // Apache config
+  /wp-config/i,                // WordPress config
+  /database/i,                 // Database files
+  /\.db$/i,                    // Database files
+  /\.sqlite/i,                 // SQLite databases
+  /\.sql$/i,                   // SQL dumps
+  /backup/i,                   // Backup files
+  /dump/i,                     // Dump files
+  /token/i,                    // Token files
+  /api[_-]?key/i,              // API key files
+  /private/i,                  // Private files
+  /\.log$/i,                   // Log files
+  /\.history/i,                // History files
+];
+
+// Check if a file path is safe to fetch
+const isFileSafe = (filePath: string): boolean => {
+  // Normalize path
+  const normalizedPath = filePath.toLowerCase().trim();
+
+  // Must be in whitelist
+  if (!SAFE_FILES_WHITELIST.has(filePath)) {
+    return false;
+  }
+
+  // Must not match any dangerous pattern (defense in depth)
+  for (const pattern of DANGEROUS_FILE_PATTERNS) {
+    if (pattern.test(normalizedPath)) {
+      console.warn(`SECURITY: Blocked potentially dangerous file: ${filePath}`);
+      return false;
+    }
+  }
+
+  return true;
+};
+
+// Sanitize content to remove any accidentally included secrets
+const sanitizeContent = (content: string, fileType: string): string => {
+  if (!content) return '';
+
+  // For package.json, only keep safe fields
+  if (fileType === 'package.json') {
+    try {
+      const pkg = JSON.parse(content);
+      // Only extract safe, non-sensitive fields
+      const safePkg = {
+        name: pkg.name,
+        description: pkg.description,
+        dependencies: pkg.dependencies,
+        devDependencies: pkg.devDependencies,
+        scripts: pkg.scripts ? Object.keys(pkg.scripts) : [], // Only script names, not values
+        keywords: pkg.keywords,
+        engines: pkg.engines,
+      };
+      return JSON.stringify(safePkg);
+    } catch {
+      return ''; // If we can't parse it safely, return nothing
+    }
+  }
+
+  // For Jupyter notebooks, only extract import statements
+  if (fileType.endsWith('.ipynb')) {
+    try {
+      const notebook = JSON.parse(content);
+      const safeContent: string[] = [];
+      const cells = notebook.cells || [];
+
+      for (const cell of cells) {
+        if (cell.cell_type !== 'code') continue;
+        const source = Array.isArray(cell.source) ? cell.source.join('') : cell.source || '';
+
+        // Only extract import/from lines
+        const lines = source.split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('import ') || trimmed.startsWith('from ')) {
+            safeContent.push(trimmed);
+          }
+        }
+      }
+
+      return JSON.stringify({ imports: safeContent });
+    } catch {
+      return '';
+    }
+  }
+
+  // For other files, remove any lines that look like secrets
+  const secretPatterns = [
+    /api[_-]?key\s*[:=]/i,
+    /secret\s*[:=]/i,
+    /password\s*[:=]/i,
+    /token\s*[:=]/i,
+    /credential\s*[:=]/i,
+    /private[_-]?key\s*[:=]/i,
+    /access[_-]?key\s*[:=]/i,
+    /auth\s*[:=]/i,
+    /bearer\s/i,
+    /-----BEGIN/i,  // PEM headers
+    /ghp_[a-zA-Z0-9]+/i,  // GitHub tokens
+    /sk-[a-zA-Z0-9]+/i,   // OpenAI keys
+    /AIza[a-zA-Z0-9]+/i,  // Google API keys
+    /AKIA[a-zA-Z0-9]+/i,  // AWS access keys
+  ];
+
+  const lines = content.split('\n');
+  const safeLines = lines.filter(line => {
+    for (const pattern of secretPatterns) {
+      if (pattern.test(line)) {
+        return false; // Remove this line
+      }
+    }
+    return true;
+  });
+
+  return safeLines.join('\n');
+};
+
+// ============================================================================
+
 // Base64 decode with browser and Node.js compatibility
 const base64Decode = (str: string): string => {
   try {
@@ -21,6 +206,7 @@ const base64Decode = (str: string): string => {
 };
 
 // Helper to fetch file content from repo with timeout and size limit
+// SECURITY: Only fetches files from the whitelist
 const fetchFileContent = async (
   token: string,
   owner: string,
@@ -29,6 +215,12 @@ const fetchFileContent = async (
   timeoutMs: number = 5000,
   maxSizeBytes: number = 1024 * 1024 // 1MB limit
 ): Promise<string | null> => {
+  // SECURITY CHECK: Only allow whitelisted files
+  if (!isFileSafe(path)) {
+    console.warn(`SECURITY: Blocked non-whitelisted file: ${path}`);
+    return null;
+  }
+
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -65,7 +257,10 @@ const fetchFileContent = async (
           console.warn(`Decoded file ${path} too large, skipping`);
           return null;
         }
-        return decoded;
+
+        // SECURITY: Sanitize content before returning
+        const sanitized = sanitizeContent(decoded, path);
+        return sanitized;
       } catch (decodeError) {
         console.error(`Failed to decode ${path}:`, decodeError);
         return null;
@@ -82,6 +277,7 @@ const fetchFileContent = async (
 };
 
 // Parse package.json to extract meaningful info with validation
+// SECURITY: Content is pre-sanitized by sanitizeContent() to only include safe fields
 const parsePackageJson = (content: string): {
   dependencies: string[];
   devDependencies: string[];
@@ -101,10 +297,24 @@ const parsePackageJson = (content: string): {
       return null;
     }
 
+    // SECURITY: Only extract dependency NAMES (not versions which could leak info)
+    // Scripts are already just names from sanitization
+    const safeDeps = Object.keys(pkg.dependencies || {})
+      .slice(0, 200)
+      .filter(name => typeof name === 'string' && name.length < 100);
+
+    const safeDevDeps = Object.keys(pkg.devDependencies || {})
+      .slice(0, 200)
+      .filter(name => typeof name === 'string' && name.length < 100);
+
+    const safeScripts = Array.isArray(pkg.scripts)
+      ? pkg.scripts.slice(0, 50).filter((s: any) => typeof s === 'string' && s.length < 50)
+      : Object.keys(pkg.scripts || {}).slice(0, 50);
+
     return {
-      dependencies: Object.keys(pkg.dependencies || {}).slice(0, 200), // Limit deps
-      devDependencies: Object.keys(pkg.devDependencies || {}).slice(0, 200),
-      scripts: Object.keys(pkg.scripts || {}).slice(0, 50),
+      dependencies: safeDeps,
+      devDependencies: safeDevDeps,
+      scripts: safeScripts,
       description: typeof pkg.description === 'string' ? pkg.description.slice(0, 500) : undefined,
     };
   } catch {
@@ -241,25 +451,42 @@ const parseCMakeLists = (content: string): string[] => {
 };
 
 // Parse Jupyter notebook for ML/Data Science projects
+// SECURITY: Content is pre-sanitized to only contain import statements
 const parseJupyterNotebook = (content: string): { imports: string[]; isML: boolean; isDataScience: boolean } => {
-  if (!content || content.length > 5000000) return { imports: [], isML: false, isDataScience: false }; // 5MB limit for notebooks
+  if (!content || content.length > 100000) return { imports: [], isML: false, isDataScience: false };
 
   try {
-    const notebook = JSON.parse(content);
+    // Content is pre-sanitized to { imports: [...] } format
+    const data = JSON.parse(content);
     const imports: string[] = [];
     let isML = false;
     let isDataScience = false;
 
-    const cells = notebook.cells || [];
-    for (const cell of cells) {
-      if (cell.cell_type !== 'code') continue;
-
-      const source = Array.isArray(cell.source) ? cell.source.join('') : cell.source || '';
-
-      // Extract imports
-      const importMatches = source.matchAll(/(?:import|from)\s+([a-zA-Z0-9_]+)/g);
-      for (const match of importMatches) {
-        if (match[1] && match[1].length < 50) imports.push(match[1]);
+    // Handle pre-sanitized format
+    if (Array.isArray(data.imports)) {
+      for (const line of data.imports) {
+        if (typeof line !== 'string') continue;
+        const importMatches = line.matchAll(/(?:import|from)\s+([a-zA-Z0-9_]+)/g);
+        for (const match of importMatches) {
+          if (match[1] && match[1].length < 50) imports.push(match[1]);
+        }
+      }
+    } else {
+      // Fallback for raw notebook format (shouldn't happen with sanitization)
+      const cells = data.cells || [];
+      for (const cell of cells) {
+        if (cell.cell_type !== 'code') continue;
+        const source = Array.isArray(cell.source) ? cell.source.join('') : cell.source || '';
+        // Only extract import lines for safety
+        const lines = source.split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('import ') && !trimmed.startsWith('from ')) continue;
+          const importMatches = trimmed.matchAll(/(?:import|from)\s+([a-zA-Z0-9_]+)/g);
+          for (const match of importMatches) {
+            if (match[1] && match[1].length < 50) imports.push(match[1]);
+          }
+        }
       }
     }
 
