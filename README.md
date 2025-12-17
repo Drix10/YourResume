@@ -13,7 +13,8 @@
 
 - Fetches your GitHub repos (public + private) and runs deep analysis
 - Smart scoring based on commits, code size, complexity — not just stars
-- Reads `package.json` / `requirements.txt` to extract your real tech stack
+- Parses dependency files from any ecosystem (JS, Python, Go, Rust, Java, Ruby, C++)
+- Auto-detects ML/Data Science projects from Jupyter notebooks
 - Merges related repos (frontend/backend/mobile) into single project entries
 - Generates ATS-optimized resume with proper keywords
 - Edit inline, refine with AI commands, export to PDF
@@ -62,11 +63,27 @@ Forks and org repos are filtered unless you have real commits in them.
 
 ## 🎯 Features
 
-- **Deep Analysis** — Parses package.json, requirements.txt, README for accurate tech stacks
+- **Multi-Language Support** — JS, Python, Go, Rust, Java, Ruby, C/C++, Jupyter notebooks
+- **ML/DS Detection** — Auto-detects TensorFlow, PyTorch, pandas, scikit-learn projects
 - **AI Refinement** — "Make it more executive" or "Add project X"
 - **Drag & Drop** — Reorder sections and items
 - **Print-Ready** — A4 format, clean margins, no awkward page breaks
 - **LinkedIn Import** — Paste your profile for better experience/education extraction
+
+---
+
+## 🌐 Supported Ecosystems
+
+| Language              | Dependency Files                                 |
+| --------------------- | ------------------------------------------------ |
+| JavaScript/TypeScript | `package.json`                                   |
+| Python                | `requirements.txt`, `setup.py`, `pyproject.toml` |
+| Go                    | `go.mod`                                         |
+| Rust                  | `Cargo.toml`                                     |
+| Java                  | `pom.xml`, `build.gradle`                        |
+| Ruby                  | `Gemfile`                                        |
+| C/C++                 | `CMakeLists.txt`                                 |
+| ML/Data Science       | `.ipynb` notebooks                               |
 
 ---
 

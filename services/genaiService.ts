@@ -171,7 +171,7 @@ export const generateResumeFromGithub = async (
     qualityScore: r.calculatedScore, // Our smart scoring
     // Deep analysis data
     packageDescription: r.enrichedData?.packageJson?.description,
-    dependencies: r.enrichedData?.detectedTechnologies?.slice(0, 20), // Top 20 techs
+    dependencies: r.enrichedData?.detectedTechnologies?.slice(0, 30), // Top 30 techs (more for diverse stacks)
     hasTests: r.enrichedData?.packageJson?.scripts?.some(s => s.includes('test')),
     hasBuild: r.enrichedData?.packageJson?.scripts?.some(s => s.includes('build')),
     hasLint: r.enrichedData?.packageJson?.scripts?.some(s => s.includes('lint')),
@@ -182,6 +182,9 @@ export const generateResumeFromGithub = async (
     complexity: r.enrichedData?.readme?.complexity,
     readmeLength: r.enrichedData?.readme?.length,
     techStack: r.enrichedData?.readme?.techMentions,
+    // ML/Data Science indicators
+    isMLProject: r.enrichedData?.isMLProject,
+    isDataScience: r.enrichedData?.isDataScience,
   }));
 
   const prompt = `
@@ -271,8 +274,8 @@ TASK: Generate an ATS-optimized, professional resume JSON.
      * "Architected scalable backend using Prisma ORM with LibSQL, supporting real-time chat and media sharing across web and mobile platforms"
    
    **MANDATORY RULES FOR PROJECT DESCRIPTIONS:**
-   - Use ACTUAL dependencies from the 'dependencies' array (these are REAL packages from package.json/requirements.txt)
-   - Mention projectType (e.g., "full-stack application", "REST API", "CLI tool", "library")
+   - Use ACTUAL dependencies from the 'dependencies' array (these are REAL packages extracted from package.json, requirements.txt, go.mod, Cargo.toml, pom.xml, build.gradle, Gemfile, CMakeLists.txt, Jupyter notebooks, etc.)
+   - Mention projectType (e.g., "full-stack application", "REST API", "CLI tool", "library", "ml-project", "data-science")
    - If hasTests=true → "comprehensive test suite" or "test-driven development"
    - If hasBuild=true → "production-ready build pipeline"
    - If hasLint=true → "enforced code quality standards"
@@ -282,16 +285,22 @@ TASK: Generate an ATS-optimized, professional resume JSON.
    - If complexity='complex' → emphasize architecture, scalability, advanced patterns
    - If stars > 10 → mention community adoption
    - If forks > 5 → mention open-source contribution
+   - If isMLProject=true → emphasize ML frameworks (TensorFlow, PyTorch, scikit-learn), model training, inference, accuracy metrics
+   - If isDataScience=true → emphasize data analysis, visualization (pandas, matplotlib, seaborn), statistical methods
+   
+   **LANGUAGE-SPECIFIC EXAMPLES:**
+   - Go: "Built high-performance microservice using Go, Gin, and GORM with PostgreSQL, handling 50K+ requests/second"
+   - Rust: "Developed memory-safe CLI tool using Rust, Clap, and Tokio for async file processing with zero runtime errors"
+   - Java: "Architected enterprise REST API using Spring Boot, Hibernate, and Maven with comprehensive JUnit test coverage"
+   - C++: "Implemented real-time graphics engine using C++17, OpenGL, and CMake with 60fps rendering performance"
+   - Ruby: "Built scalable web application using Ruby on Rails, PostgreSQL, and Sidekiq for background job processing"
+   - ML/AI: "Trained transformer-based NLP model using PyTorch and Hugging Face, achieving 94% accuracy on sentiment classification"
+   - Data Science: "Analyzed 1M+ records using pandas and NumPy, created interactive dashboards with Plotly and Streamlit"
    
    **DESCRIPTION FORMULA:**
    Bullet 1: "Developed [projectType] using [3-5 ACTUAL dependencies from list] [+ architecture pattern if complex]"
    Bullet 2: "Implemented [key features inferred from description/README] with [specific tech from dependencies]"
-   Bullet 3: "[Impact: metrics from README OR stars/forks OR deployment status]"
-   
-   **EXAMPLES:**
-   - Simple project: "Built CLI tool using Python, Click, and Requests to automate API testing workflows"
-   - Complex project: "Architected full-stack e-commerce platform using React, Redux, TypeScript, Node.js, Express, PostgreSQL, and Redis with microservices architecture, comprehensive Jest/Cypress test suite, deployed on AWS with CI/CD pipeline via GitHub Actions, serving 5000+ daily users"
-   - Library: "Developed open-source React component library using TypeScript, Storybook, and Rollup with 150+ GitHub stars and 20+ contributors"
+   Bullet 3: "[Impact: metrics from README OR stars/forks OR deployment status OR model accuracy for ML]"
    
    **BE SPECIFIC AND ACCURATE**: Only mention technologies that appear in the dependencies array or techStack
 

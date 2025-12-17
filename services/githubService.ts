@@ -131,6 +131,185 @@ const parseRequirementsTxt = (content: string): string[] => {
     .filter((pkg): pkg is string => pkg !== null && pkg.length > 0 && pkg.length < 100);
 };
 
+// Parse go.mod for Go projects
+const parseGoMod = (content: string): string[] => {
+  if (!content || content.length > 100000) return [];
+
+  const deps: string[] = [];
+  const lines = content.split('\n');
+
+  for (const line of lines) {
+    // Match require statements: require github.com/pkg/name v1.0.0
+    const requireMatch = line.match(/^\s*(?:require\s+)?([a-zA-Z0-9._/-]+)\s+v/);
+    if (requireMatch) {
+      // Extract just the package name (last part of path)
+      const parts = requireMatch[1].split('/');
+      const pkgName = parts[parts.length - 1];
+      if (pkgName && pkgName.length < 50) deps.push(pkgName);
+    }
+  }
+
+  return [...new Set(deps)].slice(0, 100);
+};
+
+// Parse Cargo.toml for Rust projects
+const parseCargoToml = (content: string): string[] => {
+  if (!content || content.length > 100000) return [];
+
+  const deps: string[] = [];
+  const lines = content.split('\n');
+  let inDeps = false;
+
+  for (const line of lines) {
+    if (/^\[dependencies\]/.test(line) || /^\[dev-dependencies\]/.test(line)) {
+      inDeps = true;
+      continue;
+    }
+    if (/^\[/.test(line)) {
+      inDeps = false;
+      continue;
+    }
+    if (inDeps) {
+      const match = line.match(/^([a-zA-Z0-9_-]+)\s*=/);
+      if (match && match[1].length < 50) deps.push(match[1]);
+    }
+  }
+
+  return [...new Set(deps)].slice(0, 100);
+};
+
+// Parse pom.xml for Java/Maven projects
+const parsePomXml = (content: string): string[] => {
+  if (!content || content.length > 500000) return [];
+
+  const deps: string[] = [];
+  // Extract artifactId from dependencies
+  const matches = content.matchAll(/<artifactId>([^<]+)<\/artifactId>/g);
+  for (const match of matches) {
+    if (match[1] && match[1].length < 50 && !match[1].includes('$')) {
+      deps.push(match[1]);
+    }
+  }
+
+  return [...new Set(deps)].slice(0, 100);
+};
+
+// Parse build.gradle for Java/Gradle projects
+const parseBuildGradle = (content: string): string[] => {
+  if (!content || content.length > 200000) return [];
+
+  const deps: string[] = [];
+  // Match implementation 'group:artifact:version' or implementation "group:artifact:version"
+  const matches = content.matchAll(/(?:implementation|compile|api|testImplementation)\s*['"(]([^'"():]+):([^'"():]+)/g);
+  for (const match of matches) {
+    if (match[2] && match[2].length < 50) {
+      deps.push(match[2]); // artifact name
+    }
+  }
+
+  return [...new Set(deps)].slice(0, 100);
+};
+
+// Parse Gemfile for Ruby projects
+const parseGemfile = (content: string): string[] => {
+  if (!content || content.length > 100000) return [];
+
+  const deps: string[] = [];
+  const lines = content.split('\n');
+
+  for (const line of lines) {
+    // Match gem 'name' or gem "name"
+    const match = line.match(/^\s*gem\s+['"]([a-zA-Z0-9_-]+)['"]/);
+    if (match && match[1].length < 50) deps.push(match[1]);
+  }
+
+  return [...new Set(deps)].slice(0, 100);
+};
+
+// Parse CMakeLists.txt for C/C++ projects
+const parseCMakeLists = (content: string): string[] => {
+  if (!content || content.length > 200000) return [];
+
+  const deps: string[] = [];
+  // Extract find_package and target_link_libraries
+  const findPkgMatches = content.matchAll(/find_package\s*\(\s*([a-zA-Z0-9_]+)/gi);
+  for (const match of findPkgMatches) {
+    if (match[1] && match[1].length < 50) deps.push(match[1]);
+  }
+
+  return [...new Set(deps)].slice(0, 100);
+};
+
+// Parse Jupyter notebook for ML/Data Science projects
+const parseJupyterNotebook = (content: string): { imports: string[]; isML: boolean; isDataScience: boolean } => {
+  if (!content || content.length > 5000000) return { imports: [], isML: false, isDataScience: false }; // 5MB limit for notebooks
+
+  try {
+    const notebook = JSON.parse(content);
+    const imports: string[] = [];
+    let isML = false;
+    let isDataScience = false;
+
+    const cells = notebook.cells || [];
+    for (const cell of cells) {
+      if (cell.cell_type !== 'code') continue;
+
+      const source = Array.isArray(cell.source) ? cell.source.join('') : cell.source || '';
+
+      // Extract imports
+      const importMatches = source.matchAll(/(?:import|from)\s+([a-zA-Z0-9_]+)/g);
+      for (const match of importMatches) {
+        if (match[1] && match[1].length < 50) imports.push(match[1]);
+      }
+    }
+
+    const uniqueImports = [...new Set(imports)];
+
+    // Detect ML libraries
+    const mlLibs = ['tensorflow', 'torch', 'pytorch', 'keras', 'sklearn', 'xgboost', 'lightgbm', 'transformers', 'huggingface'];
+    isML = uniqueImports.some(imp => mlLibs.includes(imp.toLowerCase()));
+
+    // Detect Data Science libraries
+    const dsLibs = ['pandas', 'numpy', 'matplotlib', 'seaborn', 'plotly', 'scipy', 'statsmodels'];
+    isDataScience = uniqueImports.some(imp => dsLibs.includes(imp.toLowerCase()));
+
+    return { imports: uniqueImports.slice(0, 100), isML, isDataScience };
+  } catch {
+    return { imports: [], isML: false, isDataScience: false };
+  }
+};
+
+// Parse setup.py for Python projects
+const parseSetupPy = (content: string): string[] => {
+  if (!content || content.length > 100000) return [];
+
+  const deps: string[] = [];
+  // Match install_requires list
+  const requiresMatch = content.match(/install_requires\s*=\s*\[([\s\S]*?)\]/);
+  if (requiresMatch) {
+    const matches = requiresMatch[1].matchAll(/['"]([a-zA-Z0-9_-]+)/g);
+    for (const match of matches) {
+      if (match[1] && match[1].length < 50) deps.push(match[1]);
+    }
+  }
+
+  return [...new Set(deps)].slice(0, 100);
+};
+
+// Parse pyproject.toml for modern Python projects
+const parsePyprojectToml = (content: string): string[] => {
+  if (!content || content.length > 100000) return [];
+
+  const deps: string[] = [];
+  // Match dependencies in various formats
+  const matches = content.matchAll(/["']([a-zA-Z0-9_-]+)(?:[><=!~]|["'])/g);
+  for (const match of matches) {
+    if (match[1] && match[1].length < 50 && match[1].length > 1) deps.push(match[1]);
+  }
+
+  return [...new Set(deps)].slice(0, 100);
+};
+
 // Extract key info from README
 const parseReadme = (content: string): {
   hasDemo: boolean;
@@ -338,6 +517,7 @@ export const enrichRepoData = async (
       const repoName = parts.slice(1).join('/'); // Handle edge case of repo names with slashes
 
       // Fetch multiple data sources in parallel for this repo
+      // Group 1: Core files (always fetch)
       const [packageJson, requirementsTxt, readme, readmeMd, commitData, languages] = await Promise.all([
         fetchFileContent(token, owner, repoName, 'package.json'),
         fetchFileContent(token, owner, repoName, 'requirements.txt'),
@@ -346,6 +526,61 @@ export const enrichRepoData = async (
         fetchCommitCount(token, owner, repoName, username),
         fetchLanguages(token, owner, repoName),
       ]);
+
+      // Group 2: Language-specific files (fetch based on detected languages)
+      const langKeys = Object.keys(languages).map(l => l.toLowerCase());
+
+      // Fetch additional dependency files based on detected languages
+      const additionalFetches: Promise<string | null>[] = [];
+      const fetchTypes: string[] = [];
+
+      // Go
+      if (langKeys.includes('go')) {
+        additionalFetches.push(fetchFileContent(token, owner, repoName, 'go.mod'));
+        fetchTypes.push('goMod');
+      }
+      // Rust
+      if (langKeys.includes('rust')) {
+        additionalFetches.push(fetchFileContent(token, owner, repoName, 'Cargo.toml'));
+        fetchTypes.push('cargoToml');
+      }
+      // Java
+      if (langKeys.includes('java')) {
+        additionalFetches.push(fetchFileContent(token, owner, repoName, 'pom.xml'));
+        additionalFetches.push(fetchFileContent(token, owner, repoName, 'build.gradle'));
+        fetchTypes.push('pomXml', 'buildGradle');
+      }
+      // Ruby
+      if (langKeys.includes('ruby')) {
+        additionalFetches.push(fetchFileContent(token, owner, repoName, 'Gemfile'));
+        fetchTypes.push('gemfile');
+      }
+      // C/C++
+      if (langKeys.includes('c') || langKeys.includes('c++') || langKeys.includes('cmake')) {
+        additionalFetches.push(fetchFileContent(token, owner, repoName, 'CMakeLists.txt'));
+        fetchTypes.push('cmakeLists');
+      }
+      // Python (additional files)
+      if (langKeys.includes('python') || langKeys.includes('jupyter notebook')) {
+        additionalFetches.push(fetchFileContent(token, owner, repoName, 'setup.py'));
+        additionalFetches.push(fetchFileContent(token, owner, repoName, 'pyproject.toml'));
+        fetchTypes.push('setupPy', 'pyprojectToml');
+      }
+      // Jupyter Notebook - try to find one
+      if (langKeys.includes('jupyter notebook')) {
+        // We'll check for common notebook names
+        additionalFetches.push(fetchFileContent(token, owner, repoName, 'main.ipynb', 5000, 5000000));
+        additionalFetches.push(fetchFileContent(token, owner, repoName, 'notebook.ipynb', 5000, 5000000));
+        fetchTypes.push('notebook1', 'notebook2');
+      }
+
+      const additionalResults = await Promise.all(additionalFetches);
+
+      // Map results to their types
+      const additionalFiles: Record<string, string | null> = {};
+      fetchTypes.forEach((type, i) => {
+        additionalFiles[type] = additionalResults[i];
+      });
 
       const readmeContent = readme || readmeMd || '';
       const packageData = packageJson ? parsePackageJson(packageJson) : null;
@@ -359,6 +594,27 @@ export const enrichRepoData = async (
         complexity: 'simple' as const
       };
 
+      // Parse additional dependency files
+      const goDeps = additionalFiles.goMod ? parseGoMod(additionalFiles.goMod) : [];
+      const rustDeps = additionalFiles.cargoToml ? parseCargoToml(additionalFiles.cargoToml) : [];
+      const javaDeps = [
+        ...(additionalFiles.pomXml ? parsePomXml(additionalFiles.pomXml) : []),
+        ...(additionalFiles.buildGradle ? parseBuildGradle(additionalFiles.buildGradle) : []),
+      ];
+      const rubyDeps = additionalFiles.gemfile ? parseGemfile(additionalFiles.gemfile) : [];
+      const cppDeps = additionalFiles.cmakeLists ? parseCMakeLists(additionalFiles.cmakeLists) : [];
+      const setupPyDeps = additionalFiles.setupPy ? parseSetupPy(additionalFiles.setupPy) : [];
+      const pyprojectDeps = additionalFiles.pyprojectToml ? parsePyprojectToml(additionalFiles.pyprojectToml) : [];
+
+      // Parse Jupyter notebooks
+      const notebookContent = additionalFiles.notebook1 || additionalFiles.notebook2;
+      const notebookData = notebookContent ? parseJupyterNotebook(notebookContent) : { imports: [], isML: false, isDataScience: false };
+
+      // Detect project type based on dependencies
+      let detectedProjectType = readmeData.projectType;
+      if (notebookData.isML) detectedProjectType = 'ml-project';
+      else if (notebookData.isDataScience) detectedProjectType = 'data-science';
+
       // Calculate language diversity score
       const languageCount = Object.keys(languages).length;
       const totalBytes = Object.values(languages).reduce((sum: number, bytes: number) => sum + bytes, 0);
@@ -367,7 +623,7 @@ export const enrichRepoData = async (
         ...repo,
         enrichedData: {
           packageJson: packageData,
-          pythonDependencies: pythonDeps,
+          pythonDependencies: [...pythonDeps, ...setupPyDeps, ...pyprojectDeps],
           commitCount: commitData.total,
           userCommitCount: commitData.userContributions,
           languages,
@@ -378,15 +634,26 @@ export const enrichRepoData = async (
             hasDemo: readmeData.hasDemo,
             hasDocs: readmeData.hasDocs,
             techMentions: readmeData.mentions,
-            projectType: readmeData.projectType,
+            projectType: detectedProjectType,
             hasMetrics: readmeData.hasMetrics,
             complexity: readmeData.complexity,
           },
-          // Combine all tech stack info
+          // ML/Data Science indicators
+          isMLProject: notebookData.isML,
+          isDataScience: notebookData.isDataScience,
+          // Combine all tech stack info from all ecosystems
           detectedTechnologies: [
             ...(packageData?.dependencies || []),
             ...(packageData?.devDependencies || []),
             ...pythonDeps,
+            ...setupPyDeps,
+            ...pyprojectDeps,
+            ...goDeps,
+            ...rustDeps,
+            ...javaDeps,
+            ...rubyDeps,
+            ...cppDeps,
+            ...notebookData.imports,
             ...readmeData.mentions,
           ].filter((v, i, a) => a.indexOf(v) === i), // Unique
         },

@@ -46,6 +46,10 @@ export interface EnrichedRepoData extends GitHubRepo {
       hasMetrics: boolean;
       complexity: 'simple' | 'moderate' | 'complex';
     };
+    // ML/Data Science detection
+    isMLProject?: boolean;
+    isDataScience?: boolean;
+    // All detected technologies from all ecosystems
     detectedTechnologies?: string[];
   };
 }
