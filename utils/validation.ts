@@ -30,19 +30,26 @@ export const isValidUrl = (url: string): boolean => {
 };
 
 export const sanitizeUrl = (url: string): string => {
-    if (!url) return '';
+    if (!url || typeof url !== 'string') return '';
 
-    // Remove javascript: and data: protocols
-    if (url.toLowerCase().startsWith('javascript:') || url.toLowerCase().startsWith('data:')) {
+    const trimmed = url.trim();
+    if (!trimmed) return '';
+
+    // Remove javascript: and data: protocols (XSS prevention)
+    const lowerUrl = trimmed.toLowerCase();
+    if (lowerUrl.startsWith('javascript:') ||
+        lowerUrl.startsWith('data:') ||
+        lowerUrl.startsWith('vbscript:') ||
+        lowerUrl.startsWith('file:')) {
         return '';
     }
 
     // Ensure URL starts with http:// or https://
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        return `https://${url}`;
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+        return `https://${trimmed}`;
     }
 
-    return url;
+    return trimmed;
 };
 
 export const sanitizeText = (text: string): string => {

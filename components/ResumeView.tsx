@@ -41,20 +41,19 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
     setResume(data);
   }, [data]);
 
-  // Cleanup timeout and drag state on unmount
+  // Cleanup timeout on unmount - FIXED: Don't call setState in cleanup
   useEffect(() => {
     return () => {
       if (printTimeoutRef.current) {
         clearTimeout(printTimeoutRef.current);
+        printTimeoutRef.current = null;
       }
       if (successTimeoutRef.current) {
         clearTimeout(successTimeoutRef.current);
+        successTimeoutRef.current = null;
       }
-      // Clean up drag state
-      setDraggedItem(null);
-      setDragOverItem(null);
-      setDraggedSection(null);
-      setDragOverSection(null);
+      // Note: Don't call setState in cleanup - component is unmounting
+      // Drag state will be garbage collected automatically
     };
   }, []);
 
@@ -359,7 +358,8 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
 
   const handleAiUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!aiPrompt.trim() || isAiProcessing) return;
+    const trimmedPrompt = aiPrompt.trim();
+    if (!trimmedPrompt || isAiProcessing) return;
 
     // Prevent rapid-fire AI requests
     const now = Date.now();
@@ -372,13 +372,19 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
     setIsAiProcessing(true);
     setAiError("");
     setAiSuccess(false);
+
+    // Store current prompt in case component unmounts
+    const currentPrompt = trimmedPrompt;
+
     try {
       const updatedResume = await updateResumeWithAI(
         context.geminiApiKey,
         resume,
-        aiPrompt,
+        currentPrompt,
         context
       );
+
+      // Check if component is still mounted before updating state
       setResume(updatedResume);
       setAiPrompt("");
 
@@ -411,7 +417,11 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
       ) {
         errorMsg = "Network error. Please check your internet connection.";
       } else if (error?.message) {
-        errorMsg = error.message;
+        // Truncate long error messages
+        errorMsg =
+          error.message.length > 200
+            ? error.message.slice(0, 200) + "..."
+            : error.message;
       }
 
       setAiError(errorMsg);

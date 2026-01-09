@@ -30,11 +30,20 @@ const App: React.FC = () => {
 
   const [errorMessage, setErrorMessage] = useState<string>("");
 
+  // Track if generation is in progress to prevent double-submission
+  const isGeneratingRef = React.useRef<boolean>(false);
+
   const handleStart = async (
     githubToken: string,
     geminiApiKey: string,
     linkedinText: string
   ) => {
+    // Prevent double-submission
+    if (isGeneratingRef.current) {
+      return;
+    }
+    isGeneratingRef.current = true;
+
     try {
       setErrorMessage("");
       setAppState(AppState.FETCHING_GITHUB);
@@ -83,8 +92,14 @@ const App: React.FC = () => {
       setAppState(AppState.READY);
     } catch (error: any) {
       console.error("Error generating resume:", error);
-      setErrorMessage(error?.message || "An unexpected error occurred.");
+      // Truncate long error messages
+      const message = error?.message || "An unexpected error occurred.";
+      setErrorMessage(
+        message.length > 300 ? message.slice(0, 300) + "..." : message
+      );
       setAppState(AppState.ERROR);
+    } finally {
+      isGeneratingRef.current = false;
     }
   };
 

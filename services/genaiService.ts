@@ -55,7 +55,7 @@ const resumeSchema: Schema = {
           description: {
             type: Type.ARRAY,
             items: { type: Type.STRING },
-            description: "2-4 impactful bullet points. Use action verbs. Highlight: technical challenges solved, technologies used, scale/metrics if available. Format: 'Verb + what + result/impact'"
+            description: "2-4 impactful bullet points using WHO/CAN/FOCUS/TRP frameworks. WHO: 'Developed [projectType] using [technologies] resulting in [outcome]'. TRP: 'Implemented [feature] achieving [result] with [metric]'. Each bullet MUST have: action verb + specific technologies from dependencies + measurable outcome."
           },
           technologies: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Key technologies used (3-6 items)" },
           url: { type: Type.STRING, description: "Repository or live URL" },
@@ -76,7 +76,7 @@ const resumeSchema: Schema = {
           description: {
             type: Type.ARRAY,
             items: { type: Type.STRING },
-            description: "2-4 achievement-focused bullets. Use Google XYZ format: 'Accomplished [X] as measured by [Y], by doing [Z]'. Include metrics when possible."
+            description: "2-4 achievement-focused bullets using WHO/CAN/FOCUS/TRP frameworks. WHO: 'Developed [WHAT] using [HOW] resulting in [OUTCOME]'. CAN: '[Challenge] → [Action] → [Numbers]'. TRP: '[Task] achieving [Result] with [Metric]'. Each bullet MUST have: action verb + specific tech + quantifiable outcome."
           }
         },
         required: ["title", "company", "period", "description"]
@@ -219,6 +219,30 @@ TASK: Generate an ATS-optimized, professional resume JSON.
 6. Spell out acronyms on first use
 7. Use standard date formats: "Jan 2023 - Present" or "2021 - 2023"
 
+=== LRBT/ATS BULLET POINT FRAMEWORKS (MANDATORY) ===
+Every bullet point MUST follow ONE of these proven frameworks for maximum ATS/LRBT scoring:
+
+**WHO Framework** (What you did, How you did it, Outcome achieved):
+- "Developed [WHAT] using [HOW/technologies] resulting in [OUTCOME with metrics]"
+- Example: "Developed real-time notification system using WebSockets and Redis, reducing user response latency by 60%"
+
+**CAN Framework** (Challenge, Action, Numbers/Results):
+- "[CHALLENGE faced] → [ACTION taken] → [NUMBERS/measurable result]"
+- Example: "Faced scaling bottleneck with 10K concurrent users → Implemented horizontal scaling with Kubernetes → Achieved 99.9% uptime handling 100K+ users"
+
+**FOCUS Framework** (Format, Outcome, Clarity, Uniqueness, Structure):
+- Clear action verb + unique contribution + structured outcome
+- Example: "Architected microservices migration strategy, reducing deployment time from 2 hours to 15 minutes while maintaining zero-downtime releases"
+
+**TRP Framework** (Task, Result, Performance metric):
+- "[TASK] achieving [RESULT] with [PERFORMANCE METRIC]"
+- Example: "Optimized database queries achieving 3x faster page loads with 40% reduction in server costs"
+
+CRITICAL: Each bullet MUST contain:
+- Strong ACTION VERB (Developed, Architected, Implemented, Optimized, Led, Designed, Built, Engineered, Automated, Streamlined)
+- SPECIFIC technologies/tools used
+- QUANTIFIABLE outcome (%, numbers, time saved, scale handled, cost reduction)
+
 === SECTION GUIDELINES ===
 
 1. PROFESSIONAL TITLE:
@@ -236,10 +260,19 @@ TASK: Generate an ATS-optimized, professional resume JSON.
 3. EXPERIENCE:
    - PRIMARY: Extract from LinkedIn (company, title, dates, achievements)
    - FALLBACK: "Open Source Developer" or "Freelance Software Engineer" based on GitHub activity
-   - BULLET FORMAT (STAR Method):
-     * Start with strong ACTION VERB (Developed, Implemented, Architected, Optimized, Led, Designed)
-     * Include WHAT you did + HOW + MEASURABLE RESULT
-     * Example: "Developed RESTful API using Node.js and Express, reducing response time by 40% and handling 10K+ daily requests"
+   - BULLET FORMAT (Use WHO/CAN/FOCUS/TRP frameworks):
+     * WHO: "Developed [WHAT] using [HOW] resulting in [OUTCOME]"
+     * CAN: "[Challenge] → [Action] → [Numbers/Results]"
+     * FOCUS: Clear verb + unique contribution + structured outcome
+     * TRP: "[Task] achieving [Result] with [Performance metric]"
+   - MANDATORY ELEMENTS per bullet:
+     * Strong ACTION VERB (Developed, Implemented, Architected, Optimized, Led, Designed, Engineered, Automated)
+     * SPECIFIC technologies/tools (not generic terms)
+     * QUANTIFIABLE outcome (%, $, time, scale, users, requests)
+   - Examples using frameworks:
+     * WHO: "Developed microservices architecture using Go and gRPC, reducing inter-service latency by 75%"
+     * CAN: "Addressed 500ms API latency → Implemented Redis caching layer → Achieved sub-50ms response times"
+     * TRP: "Migrated legacy monolith to Kubernetes achieving 99.99% uptime with 60% infrastructure cost reduction"
    - 3-5 bullets per role, most impactful first
    - Include technologies used in each bullet naturally
 
@@ -297,10 +330,15 @@ TASK: Generate an ATS-optimized, professional resume JSON.
    - ML/AI: "Trained transformer-based NLP model using PyTorch and Hugging Face, achieving 94% accuracy on sentiment classification"
    - Data Science: "Analyzed 1M+ records using pandas and NumPy, created interactive dashboards with Plotly and Streamlit"
    
-   **DESCRIPTION FORMULA:**
-   Bullet 1: "Developed [projectType] using [3-5 ACTUAL dependencies from list] [+ architecture pattern if complex]"
-   Bullet 2: "Implemented [key features inferred from description/README] with [specific tech from dependencies]"
-   Bullet 3: "[Impact: metrics from README OR stars/forks OR deployment status OR model accuracy for ML]"
+   **DESCRIPTION FORMULA (Use WHO/CAN/FOCUS/TRP frameworks):**
+   Bullet 1 (WHO): "Developed [projectType] using [3-5 ACTUAL dependencies] resulting in [outcome/scale]"
+   Bullet 2 (TRP): "Implemented [key feature] achieving [result] with [performance metric from README or inferred]"
+   Bullet 3 (CAN): "[Challenge addressed] → [Technical solution with specific tech] → [Quantifiable impact]"
+   
+   **MANDATORY: Every bullet MUST have:**
+   - Action verb (Developed, Built, Architected, Implemented, Engineered, Designed, Optimized, Automated)
+   - Specific technologies from the dependencies array
+   - Measurable outcome (metrics from README, stars/forks, deployment status, inferred scale)
    
    **BE SPECIFIC AND ACCURATE**: Only mention technologies that appear in the dependencies array or techStack
 
@@ -311,14 +349,23 @@ TASK: Generate an ATS-optimized, professional resume JSON.
    - Format as comma-separated lists for ATS parsing
 
 === QUALITY STANDARDS ===
+- Every bullet MUST follow WHO, CAN, FOCUS, or TRP framework
 - Every bullet MUST have a measurable outcome or clear impact
-- Use numbers: "50% faster", "10K users", "99.9% uptime", "3x improvement"
-- NO generic phrases: "responsible for", "worked on", "helped with"
+- Use numbers: "50% faster", "10K users", "99.9% uptime", "3x improvement", "$50K saved"
+- NO generic phrases: "responsible for", "worked on", "helped with", "assisted in"
 - NO first person (I, my, we)
 - Keep bullets concise: 1-2 lines max
 - Prioritize recent and relevant experience
 - Technical depth over breadth
 - ATS-friendly formatting
+
+=== LRBT COMPATIBILITY CHECKLIST ===
+Before finalizing, verify each bullet has:
+✓ Strong action verb at the start
+✓ Specific technology/tool mentioned
+✓ Quantifiable result or clear business impact
+✓ Follows WHO/CAN/FOCUS/TRP structure
+✓ No vague language or filler words
 
 Output strictly valid JSON matching the schema.
   `;
@@ -430,6 +477,10 @@ const sanitizeUserPrompt = (prompt: string): string => {
   sanitized = sanitized
     .replace(/```/g, '') // Remove code blocks
     .replace(/\n{3,}/g, '\n\n') // Limit consecutive newlines
+    .replace(/^(system|assistant|user):/gim, '') // Remove role prefixes
+    .replace(/\[INST\]|\[\/INST\]/gi, '') // Remove instruction markers
+    .replace(/<\|.*?\|>/g, '') // Remove special tokens
+    .replace(/<<.*?>>/g, '') // Remove template markers
     .trim();
 
   return sanitized;
@@ -499,29 +550,45 @@ USER INSTRUCTION:
    - DO NOT condense content unless explicitly asked
    - Copy unchanged sections EXACTLY (including all IDs)
 
-2. ATS OPTIMIZATION (Apply to ALL changes):
-   - Use standard action verbs: Developed, Implemented, Designed, Led, Optimized, Built
-   - Include measurable results: percentages, numbers, scale
+2. ATS/LRBT OPTIMIZATION (Apply to ALL changes):
+   - Use standard action verbs: Developed, Implemented, Designed, Led, Optimized, Built, Engineered, Architected
+   - Include measurable results: percentages, numbers, scale, cost savings
    - Use full technology names: "JavaScript" not "JS", "Amazon Web Services (AWS)"
    - NO special characters, emojis, or fancy formatting
    - Keep bullet points concise (1-2 lines)
 
-3. WHEN ADDING CONTENT:
-   - Projects: Find in REPOSITORIES, create 2-3 impactful bullets with technologies and metrics
-   - Experience: Use STAR format (Situation, Task, Action, Result)
+3. MANDATORY BULLET FRAMEWORKS (WHO/CAN/FOCUS/TRP):
+   Every bullet MUST follow one of these LRBT-optimized frameworks:
+   
+   **WHO** (What, How, Outcome):
+   - "Developed [WHAT] using [HOW/tech] resulting in [OUTCOME with metrics]"
+   
+   **CAN** (Challenge, Action, Numbers):
+   - "[Challenge] → [Action taken] → [Quantifiable result]"
+   
+   **FOCUS** (Format, Outcome, Clarity, Uniqueness, Structure):
+   - Clear verb + unique contribution + structured measurable outcome
+   
+   **TRP** (Task, Result, Performance):
+   - "[Task] achieving [Result] with [Performance metric]"
+
+4. WHEN ADDING CONTENT:
+   - Projects: Find in REPOSITORIES, create 2-3 impactful bullets using WHO/CAN/TRP frameworks
+   - Experience: Use frameworks above with specific technologies and metrics
    - Skills: Add to appropriate category (languages/frameworks/tools)
 
-4. BULLET POINT FORMAT:
+5. BULLET POINT REQUIREMENTS:
    - Start with strong ACTION VERB
-   - Include WHAT + HOW + RESULT
-   - Example: "Developed scalable REST API using Node.js and PostgreSQL, handling 50K+ daily requests with 99.9% uptime"
+   - Include SPECIFIC technologies (not generic terms)
+   - End with QUANTIFIABLE outcome (%, numbers, time, scale, cost)
+   - Example: "Architected event-driven microservices using Kafka and Go, processing 1M+ events/day with 99.99% reliability"
 
-5. COMMON REQUESTS:
-   - "Make it more impactful" → Add metrics and stronger verbs to existing bullets
-   - "Add project X" → Create entry with tech stack and 2-3 achievement bullets
-   - "Condense" → Keep most impactful points, remove redundancy
+6. COMMON REQUESTS:
+   - "Make it more impactful" → Add metrics and stronger verbs, apply WHO/CAN frameworks
+   - "Add project X" → Create entry with tech stack and 2-3 framework-compliant bullets
+   - "Condense" → Keep most impactful points using TRP format for brevity
    - "More technical" → Add specific technologies, architectures, methodologies
-   - "Target [role]" → Emphasize relevant skills and experiences for that role
+   - "Target [role]" → Emphasize relevant skills using industry keywords
 
 Return complete resume JSON with ONLY the requested changes.
   `;
