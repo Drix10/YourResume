@@ -97,6 +97,15 @@ export interface ResumeEducation {
   period: string;
 }
 
+export interface ResumeCertification {
+  id: string;
+  name: string;
+  issuer: string;
+  date: string;
+  credentialId?: string;
+  credentialUrl?: string;
+}
+
 export interface ResumeData {
   fullName: string;
   title: string;
@@ -107,6 +116,7 @@ export interface ResumeData {
   location: string;
   linkedinUrl?: string;
   education: ResumeEducation[];
+  certifications?: ResumeCertification[];
   skills: {
     languages: string[];
     frameworks: string[];

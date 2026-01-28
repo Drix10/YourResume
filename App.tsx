@@ -147,6 +147,31 @@ const App: React.FC = () => {
         };
       };
 
+      // Validate and sanitize certification items
+      const validateCertification = (cert: any): any => {
+        if (!cert || typeof cert !== "object") return null;
+        return {
+          id: cert.id || generateId(),
+          name:
+            typeof cert.name === "string"
+              ? cert.name.slice(0, 200)
+              : "Certification",
+          issuer:
+            typeof cert.issuer === "string"
+              ? cert.issuer.slice(0, 200)
+              : "Issuer",
+          date: typeof cert.date === "string" ? cert.date.slice(0, 50) : "",
+          credentialId:
+            typeof cert.credentialId === "string"
+              ? cert.credentialId.slice(0, 100)
+              : undefined,
+          credentialUrl:
+            typeof cert.credentialUrl === "string"
+              ? cert.credentialUrl.slice(0, 500)
+              : undefined,
+        };
+      };
+
       // Validate and sanitize experience items
       const validateExperience = (exp: any): any => {
         if (!exp || typeof exp !== "object") return null;
@@ -243,6 +268,12 @@ const App: React.FC = () => {
               .map(validateEducation)
               .filter((item): item is NonNullable<typeof item> => item !== null)
               .slice(0, 10) // Max 10 education entries
+          : [],
+        certifications: Array.isArray(importedData.certifications)
+          ? importedData.certifications
+              .map(validateCertification)
+              .filter((item): item is NonNullable<typeof item> => item !== null)
+              .slice(0, 20) // Max 20 certifications
           : [],
         skills: {
           languages: validateSkillArray(importedData.skills?.languages),

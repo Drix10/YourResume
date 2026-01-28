@@ -35,6 +35,21 @@ const resumeSchema: Schema = {
         required: ["institution", "degree"]
       }
     },
+    certifications: {
+      type: Type.ARRAY,
+      description: "Professional certifications and licenses. Extract from LinkedIn text. Include credential IDs and URLs if available. Leave empty array if none found.",
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          name: { type: Type.STRING, description: "Certification name (e.g., 'AI Engineering Professional Certificate')" },
+          issuer: { type: Type.STRING, description: "Issuing organization (e.g., 'IBM', 'AWS', 'Google')" },
+          date: { type: Type.STRING, description: "Issue date or completion date (e.g., 'Jan 2024', '2024')" },
+          credentialId: { type: Type.STRING, description: "Credential ID if available" },
+          credentialUrl: { type: Type.STRING, description: "Credential verification URL if available" }
+        },
+        required: ["name", "issuer", "date"]
+      }
+    },
     skills: {
       type: Type.OBJECT,
       description: "Technical skills organized by category. Be comprehensive but accurate.",
@@ -257,7 +272,14 @@ CRITICAL: Each bullet MUST contain:
    - Format: Institution, Degree, Location, Period
    - Include GPA only if 3.5+ or honors/awards
 
-3. EXPERIENCE:
+3. CERTIFICATIONS & LICENSES:
+   - Extract from LinkedIn text (look for "Licenses & certifications" section)
+   - Include: Certification name, Issuing organization, Date, Credential ID, Credential URL
+   - DO NOT fabricate - return empty array if none found
+   - Examples: "AWS Certified Solutions Architect", "Google Cloud Professional", "IBM AI Engineering"
+   - Keep credential IDs and URLs if mentioned
+
+4. EXPERIENCE:
    - PRIMARY: Extract from LinkedIn (company, title, dates, achievements)
    - FALLBACK: "Open Source Developer" or "Freelance Software Engineer" based on GitHub activity
    - BULLET FORMAT (Use WHO/CAN/FOCUS/TRP frameworks):
@@ -276,7 +298,7 @@ CRITICAL: Each bullet MUST contain:
    - 3-5 bullets per role, most impactful first
    - Include technologies used in each bullet naturally
 
-4. PROJECTS (USE DEEP ANALYSIS DATA - THIS IS CRITICAL):
+5. PROJECTS (USE DEEP ANALYSIS DATA - THIS IS CRITICAL):
    - Repos are ALREADY SORTED by qualityScore (considers commits, code size, complexity, tests, docs)
    - Select 3-5 BEST projects from the top of the list
    - PRIVATE REPOS with high commits are often MORE impressive than public repos with stars
@@ -348,7 +370,7 @@ CRITICAL: Each bullet MUST contain:
    
    **BE SPECIFIC AND ACCURATE**: Only mention technologies that appear in the dependencies array or techStack
 
-5. TECHNICAL SKILLS (ATS-Critical):
+6. TECHNICAL SKILLS (ATS-Critical):
    - Languages: List ALL programming languages from repos (JavaScript, TypeScript, Python, Java, etc.)
    - Frameworks: React, Node.js, Express, Django, Spring Boot, etc.
    - Tools & Platforms: Git, Docker, Kubernetes, AWS, GCP, Azure, CI/CD, databases
@@ -420,6 +442,7 @@ Output strictly valid JSON matching the schema.
   data.location = data.location || user.location || '';
   data.linkedinUrl = data.linkedinUrl || '';
   data.education = data.education || [];
+  data.certifications = data.certifications || [];
   data.experience = data.experience || [];
   data.projects = data.projects || [];
   data.skills = data.skills || { languages: [], frameworks: [], tools: [] };
@@ -433,6 +456,7 @@ Output strictly valid JSON matching the schema.
 
   // Assign UUIDs to items that don't have them
   data.education = data.education.map(e => ({ ...e, id: e.id || generateId() }));
+  data.certifications = (data.certifications || []).map(c => ({ ...c, id: c.id || generateId() }));
   data.experience = data.experience.map(e => ({ ...e, id: e.id || generateId() }));
 
   data.projects = data.projects.map(p => {
@@ -639,6 +663,7 @@ Return complete resume JSON with ONLY the requested changes.
   newData.projects = newData.projects || [];
   newData.experience = newData.experience || [];
   newData.education = newData.education || [];
+  newData.certifications = newData.certifications || [];
   newData.skills = newData.skills || { languages: [], frameworks: [], tools: [] };
 
   // Re-hydrate links just in case AI dropped them or added new projects without URLs
@@ -683,6 +708,11 @@ Return complete resume JSON with ONLY the requested changes.
   newData.education = newData.education.map(e => ({
     ...e,
     id: e.id || generateId()
+  }));
+
+  newData.certifications = (newData.certifications || []).map(c => ({
+    ...c,
+    id: c.id || generateId()
   }));
 
   return newData;

@@ -301,13 +301,21 @@ const ResumeView: React.FC<ResumeViewProps> = ({
   };
 
   const handleNestedChange = (
-    section: "education" | "experience" | "projects",
+    section: "education" | "certifications" | "experience" | "projects",
     index: number,
     field: string,
     value: any,
   ) => {
+    // Sanitize URLs before saving
+    if (field === "credentialUrl" || field === "url") {
+      value = sanitizeUrl(value);
+    }
+
     setResume((prev) => {
-      const sectionArray = [...(prev[section] as any[])];
+      const sectionArray =
+        section === "certifications"
+          ? [...(prev.certifications || [])]
+          : [...(prev[section] as any[])];
       sectionArray[index] = { ...sectionArray[index], [field]: value };
       return { ...prev, [section]: sectionArray };
     });
@@ -338,9 +346,15 @@ const ResumeView: React.FC<ResumeViewProps> = ({
     });
   };
 
-  const addItem = (section: "education" | "experience" | "projects") => {
+  const addItem = (
+    section: "education" | "certifications" | "experience" | "projects",
+  ) => {
     setResume((prev) => {
-      const newArray = [...(prev[section] as any[])];
+      const newArray =
+        section === "certifications"
+          ? [...(prev.certifications || [])]
+          : [...(prev[section] as any[])];
+
       if (section === "education")
         newArray.push({
           id: generateId(),
@@ -348,6 +362,15 @@ const ResumeView: React.FC<ResumeViewProps> = ({
           degree: "Degree",
           location: "Location",
           period: "Date",
+        });
+      if (section === "certifications")
+        newArray.push({
+          id: generateId(),
+          name: "Certification Name",
+          issuer: "Issuing Organization",
+          date: "Date",
+          credentialId: "",
+          credentialUrl: "",
         });
       if (section === "experience")
         newArray.push({
@@ -371,11 +394,14 @@ const ResumeView: React.FC<ResumeViewProps> = ({
   };
 
   const removeItem = (
-    section: "education" | "experience" | "projects",
+    section: "education" | "certifications" | "experience" | "projects",
     index: number,
   ) => {
     setResume((prev) => {
-      const newArray = [...(prev[section] as any[])];
+      const newArray =
+        section === "certifications"
+          ? [...(prev.certifications || [])]
+          : [...(prev[section] as any[])];
       newArray.splice(index, 1);
       return { ...prev, [section]: newArray };
     });
@@ -392,7 +418,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({
   } | null>(null);
 
   const handleDragStart = (
-    section: "education" | "experience" | "projects",
+    section: "education" | "certifications" | "experience" | "projects",
     index: number,
   ) => {
     setDraggedItem({ section, index });
@@ -400,7 +426,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({
 
   const handleDragOver = (
     e: React.DragEvent,
-    section: "education" | "experience" | "projects",
+    section: "education" | "certifications" | "experience" | "projects",
     index: number,
   ) => {
     e.preventDefault();
@@ -416,7 +442,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({
   };
 
   const handleDrop = (
-    section: "education" | "experience" | "projects",
+    section: "education" | "certifications" | "experience" | "projects",
     dropIndex: number,
   ) => {
     if (!draggedItem || draggedItem.section !== section) {
@@ -429,7 +455,10 @@ const ResumeView: React.FC<ResumeViewProps> = ({
       return;
     }
     setResume((prev) => {
-      const newArray = [...(prev[section] as any[])];
+      const newArray =
+        section === "certifications"
+          ? [...(prev.certifications || [])]
+          : [...(prev[section] as any[])];
 
       // Safety check: ensure indices are valid
       if (
@@ -449,9 +478,15 @@ const ResumeView: React.FC<ResumeViewProps> = ({
   };
 
   // Section drag and drop
-  type SectionType = "education" | "experience" | "projects" | "skills";
+  type SectionType =
+    | "education"
+    | "certifications"
+    | "experience"
+    | "projects"
+    | "skills";
   const [sectionOrder, setSectionOrder] = useState<SectionType[]>([
     "education",
+    "certifications",
     "experience",
     "projects",
     "skills",
@@ -499,6 +534,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({
 
   const sectionNames: Record<SectionType, string> = {
     education: "Education",
+    certifications: "Certifications & Licenses",
     experience: "Experience",
     projects: "Projects",
     skills: "Technical Skills",
@@ -610,6 +646,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({
     const HEADER_HEIGHT = 35;
     const SECTION_HEADER_HEIGHT = 8;
     const EDUCATION_ITEM_HEIGHT = 15;
+    const CERTIFICATION_ITEM_HEIGHT = 12;
     const EXPERIENCE_ITEM_HEIGHT = 25;
     const PROJECT_ITEM_HEIGHT = 20;
     const SKILLS_HEIGHT = 25;
@@ -620,6 +657,13 @@ const ResumeView: React.FC<ResumeViewProps> = ({
     if (resume.education?.length > 0) {
       totalHeight +=
         SECTION_HEADER_HEIGHT + resume.education.length * EDUCATION_ITEM_HEIGHT;
+    }
+
+    // Certifications
+    if (resume.certifications?.length > 0) {
+      totalHeight +=
+        SECTION_HEADER_HEIGHT +
+        resume.certifications.length * CERTIFICATION_ITEM_HEIGHT;
     }
 
     // Experience
@@ -646,7 +690,13 @@ const ResumeView: React.FC<ResumeViewProps> = ({
     // Ensure at least 1 page, even for minimal content
     const pages = Math.ceil(totalHeight / USABLE_HEIGHT_MM);
     return Math.max(1, pages);
-  }, [resume.education, resume.experience, resume.projects, resume.skills]);
+  }, [
+    resume.education,
+    resume.certifications,
+    resume.experience,
+    resume.projects,
+    resume.skills,
+  ]);
 
   const contentDensityClass = useMemo(() => {
     const experienceDesc =
@@ -662,6 +712,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({
     const totalBullets = experienceDesc + projectsDesc;
     const totalItems =
       (resume.education?.length || 0) +
+      (resume.certifications?.length || 0) +
       (resume.experience?.length || 0) +
       (resume.projects?.length || 0);
     const totalSkills =
@@ -675,7 +726,13 @@ const ResumeView: React.FC<ResumeViewProps> = ({
     if (densityScore > RESUME_DENSITY.COMPACT_THRESHOLD)
       return "resume-compact";
     return "";
-  }, [resume.education, resume.experience, resume.projects, resume.skills]);
+  }, [
+    resume.education,
+    resume.certifications,
+    resume.experience,
+    resume.projects,
+    resume.skills,
+  ]);
 
   return (
     <div className="min-h-screen bg-[#181B26] py-10 px-4 md:px-0 print:bg-white print:p-0">
@@ -1090,71 +1147,83 @@ const ResumeView: React.FC<ResumeViewProps> = ({
                       </a>
                     </span>
                   )}
-                  {resume.linkedinUrl && (
-                    <span className="flex items-center gap-1.5">
-                      <svg
-                        className="w-3 h-3"
-                        fill="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
-                      </svg>
-                      <a
-                        href={resume.linkedinUrl}
-                        className="hover:underline"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        {displayUrl(resume.linkedinUrl)}
-                      </a>
-                    </span>
-                  )}
-                  {resume.githubUrl && (
-                    <span className="flex items-center gap-1.5">
-                      <svg
-                        className="w-3 h-3"
-                        fill="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                      <a
-                        href={resume.githubUrl}
-                        className="hover:underline"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        {displayUrl(resume.githubUrl)}
-                      </a>
-                    </span>
-                  )}
-                  {resume.website && (
-                    <span className="flex items-center gap-1.5">
-                      <svg
-                        className="w-3 h-3"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M10 18a8 8 0 100-16 8 8 0 000 16zM4.332 8.027a6.012 6.012 0 011.912-2.706C6.512 5.73 6.974 6 7.5 6A1.5 1.5 0 019 7.5V8a2 2 0 004 0 2 2 0 011.523-1.943A5.977 5.977 0 0116 10c0 .34-.028.675-.083 1H15a2 2 0 00-2 2v2.197A5.973 5.973 0 0110 16v-2a2 2 0 00-2-2 2 2 0 01-2-2 2 2 0 00-1.668-1.973z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                      <a
-                        href={resume.website}
-                        className="hover:underline"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        {displayUrl(resume.website)}
-                      </a>
-                    </span>
-                  )}
+                  {resume.linkedinUrl &&
+                    (() => {
+                      const sanitizedLinkedin = sanitizeUrl(resume.linkedinUrl);
+                      return sanitizedLinkedin ? (
+                        <span className="flex items-center gap-1.5">
+                          <svg
+                            className="w-3 h-3"
+                            fill="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
+                          </svg>
+                          <a
+                            href={sanitizedLinkedin}
+                            className="hover:underline"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {displayUrl(sanitizedLinkedin)}
+                          </a>
+                        </span>
+                      ) : null;
+                    })()}
+                  {resume.githubUrl &&
+                    (() => {
+                      const sanitizedGithub = sanitizeUrl(resume.githubUrl);
+                      return sanitizedGithub ? (
+                        <span className="flex items-center gap-1.5">
+                          <svg
+                            className="w-3 h-3"
+                            fill="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                          <a
+                            href={sanitizedGithub}
+                            className="hover:underline"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {displayUrl(sanitizedGithub)}
+                          </a>
+                        </span>
+                      ) : null;
+                    })()}
+                  {resume.website &&
+                    (() => {
+                      const sanitizedWebsite = sanitizeUrl(resume.website);
+                      return sanitizedWebsite ? (
+                        <span className="flex items-center gap-1.5">
+                          <svg
+                            className="w-3 h-3"
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M10 18a8 8 0 100-16 8 8 0 000 16zM4.332 8.027a6.012 6.012 0 011.912-2.706C6.512 5.73 6.974 6 7.5 6A1.5 1.5 0 019 7.5V8a2 2 0 004 0 2 2 0 011.523-1.943A5.977 5.977 0 0116 10c0 .34-.028.675-.083 1H15a2 2 0 00-2 2v2.197A5.973 5.973 0 0110 16v-2a2 2 0 00-2-2 2 2 0 01-2-2 2 2 0 00-1.668-1.973z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                          <a
+                            href={sanitizedWebsite}
+                            className="hover:underline"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {displayUrl(sanitizedWebsite)}
+                          </a>
+                        </span>
+                      ) : null;
+                    })()}
                 </>
               )}
             </div>
@@ -1319,6 +1388,219 @@ const ResumeView: React.FC<ResumeViewProps> = ({
                             <span>{edu.period}</span>
                           )}
                         </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              );
+            }
+
+            if (sectionKey === "certifications") {
+              return (
+                <section
+                  key="certifications"
+                  className={`mb-4 resume-section ${
+                    draggedSection === "certifications" ? "opacity-50" : ""
+                  } ${
+                    dragOverSection === "certifications"
+                      ? "border-t-4 border-blue-500"
+                      : ""
+                  }`}
+                  draggable={isEditing}
+                  onDragStart={(e) => {
+                    e.stopPropagation();
+                    handleSectionDragStart("certifications");
+                  }}
+                  onDragOver={(e) => handleSectionDragOver(e, "certifications")}
+                  onDragEnd={handleSectionDragEnd}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    handleSectionDrop("certifications");
+                  }}
+                >
+                  <div className="flex justify-between items-center border-b border-black mb-2 pb-0.5">
+                    {isEditing && (
+                      <span className="text-gray-400 cursor-grab mr-2 no-print text-lg">
+                        ⋮⋮
+                      </span>
+                    )}
+                    <h2 className="text-[11pt] font-bold uppercase tracking-wider flex-1">
+                      {sectionNames.certifications}
+                    </h2>
+                    {isEditing && (
+                      <button
+                        type="button"
+                        onClick={() => addItem("certifications")}
+                        className="text-xs bg-green-100 text-green-700 px-2 rounded"
+                      >
+                        + Add
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    {(!resume.certifications ||
+                      resume.certifications.length === 0) &&
+                      !isEditing && (
+                        <p className="text-[10pt] text-gray-500 italic">
+                          No certifications available
+                        </p>
+                      )}
+                    {resume.certifications?.map((cert, idx) => (
+                      <div
+                        key={cert.id}
+                        className={`flex flex-col relative group certification-item resume-item ${
+                          isEditing
+                            ? "cursor-move hover:bg-gray-50 rounded p-1 -m-1"
+                            : ""
+                        } ${
+                          draggedItem?.section === "certifications" &&
+                          draggedItem?.index === idx
+                            ? "opacity-50"
+                            : ""
+                        } ${
+                          dragOverItem?.section === "certifications" &&
+                          dragOverItem?.index === idx
+                            ? "border-t-2 border-blue-500"
+                            : ""
+                        }`}
+                        draggable={isEditing}
+                        onDragStart={() =>
+                          handleDragStart("certifications", idx)
+                        }
+                        onDragOver={(e) =>
+                          handleDragOver(e, "certifications", idx)
+                        }
+                        onDragEnd={handleDragEnd}
+                        onDrop={() => handleDrop("certifications", idx)}
+                      >
+                        {isEditing && (
+                          <span className="absolute -left-5 top-1/2 -translate-y-1/2 text-gray-300 cursor-grab no-print">
+                            ⋮⋮
+                          </span>
+                        )}
+                        {isEditing && (
+                          <button
+                            type="button"
+                            onClick={() => removeItem("certifications", idx)}
+                            className="absolute -left-10 top-0 text-red-400 hover:text-red-600 no-print"
+                            aria-label={`Remove ${cert.name}`}
+                          >
+                            ×
+                          </button>
+                        )}
+                        <div className="flex justify-between items-baseline">
+                          {isEditing ? (
+                            <input
+                              className="font-bold text-[11pt] w-2/3 border-b border-gray-200 bg-transparent outline-none"
+                              value={cert.name}
+                              onChange={(e) =>
+                                handleNestedChange(
+                                  "certifications",
+                                  idx,
+                                  "name",
+                                  e.target.value,
+                                )
+                              }
+                            />
+                          ) : (
+                            <span className="font-bold text-[11pt]">
+                              {cert.name}
+                            </span>
+                          )}
+                          {isEditing ? (
+                            <input
+                              className="text-[10pt] text-right border-b border-gray-200 bg-transparent outline-none"
+                              value={cert.date}
+                              onChange={(e) =>
+                                handleNestedChange(
+                                  "certifications",
+                                  idx,
+                                  "date",
+                                  e.target.value,
+                                )
+                              }
+                            />
+                          ) : (
+                            <span className="text-[10pt]">{cert.date}</span>
+                          )}
+                        </div>
+                        <div className="flex justify-between items-baseline text-[10pt]">
+                          {isEditing ? (
+                            <input
+                              className="w-2/3 border-b border-gray-200 bg-transparent outline-none italic"
+                              value={cert.issuer}
+                              onChange={(e) =>
+                                handleNestedChange(
+                                  "certifications",
+                                  idx,
+                                  "issuer",
+                                  e.target.value,
+                                )
+                              }
+                            />
+                          ) : (
+                            <span className="italic">{cert.issuer}</span>
+                          )}
+                        </div>
+                        {(cert.credentialId || isEditing) && (
+                          <div className="text-[9pt] text-gray-600">
+                            {isEditing ? (
+                              <input
+                                className="w-full border-b border-gray-200 bg-transparent outline-none"
+                                placeholder="Credential ID (optional)"
+                                value={cert.credentialId || ""}
+                                onChange={(e) =>
+                                  handleNestedChange(
+                                    "certifications",
+                                    idx,
+                                    "credentialId",
+                                    e.target.value,
+                                  )
+                                }
+                              />
+                            ) : (
+                              cert.credentialId && (
+                                <span>Credential ID: {cert.credentialId}</span>
+                              )
+                            )}
+                          </div>
+                        )}
+                        {(cert.credentialUrl || isEditing) && (
+                          <div className="text-[9pt]">
+                            {isEditing ? (
+                              <input
+                                className="w-full border-b border-gray-200 bg-transparent outline-none"
+                                placeholder="Credential URL (optional)"
+                                value={cert.credentialUrl || ""}
+                                onChange={(e) =>
+                                  handleNestedChange(
+                                    "certifications",
+                                    idx,
+                                    "credentialUrl",
+                                    e.target.value,
+                                  )
+                                }
+                              />
+                            ) : (
+                              cert.credentialUrl &&
+                              (() => {
+                                const sanitizedUrl = sanitizeUrl(
+                                  cert.credentialUrl,
+                                );
+                                return sanitizedUrl ? (
+                                  <a
+                                    href={sanitizedUrl}
+                                    className="text-blue-600 hover:underline"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  >
+                                    Show credential
+                                  </a>
+                                ) : null;
+                              })()
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1663,29 +1945,42 @@ const ResumeView: React.FC<ResumeViewProps> = ({
                                         - No homepage + Public repo = GitHub link only
                                         - No homepage + Private repo = No links
                                     */}
-                                    {proj.homepage && (
-                                      <a
-                                        href={proj.homepage}
-                                        className="hover:underline"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                      >
-                                        Live Link
-                                      </a>
-                                    )}
+                                    {proj.homepage &&
+                                      (() => {
+                                        const sanitizedHomepage = sanitizeUrl(
+                                          proj.homepage,
+                                        );
+                                        return sanitizedHomepage ? (
+                                          <a
+                                            href={sanitizedHomepage}
+                                            className="hover:underline"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                          >
+                                            Live Link
+                                          </a>
+                                        ) : null;
+                                      })()}
                                     {proj.homepage &&
                                       !proj.isPrivate &&
                                       proj.url && <span>—</span>}
-                                    {!proj.isPrivate && proj.url && (
-                                      <a
-                                        href={proj.url}
-                                        className="hover:underline"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                      >
-                                        GitHub
-                                      </a>
-                                    )}
+                                    {!proj.isPrivate &&
+                                      proj.url &&
+                                      (() => {
+                                        const sanitizedUrl = sanitizeUrl(
+                                          proj.url,
+                                        );
+                                        return sanitizedUrl ? (
+                                          <a
+                                            href={sanitizedUrl}
+                                            className="hover:underline"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                          >
+                                            GitHub
+                                          </a>
+                                        ) : null;
+                                      })()}
                                   </div>
                                 )}
                               </div>
