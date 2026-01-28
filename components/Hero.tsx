@@ -5,13 +5,19 @@ interface HeroProps {
   onStart: (
     githubToken: string,
     geminiApiKey: string,
-    linkedinText: string
+    linkedinText: string,
   ) => void;
+  onImportResume: (resumeData: any) => void;
   state: AppState;
   errorMessage?: string;
 }
 
-const Hero: React.FC<HeroProps> = ({ onStart, state, errorMessage }) => {
+const Hero: React.FC<HeroProps> = ({
+  onStart,
+  onImportResume,
+  state,
+  errorMessage,
+}) => {
   const [githubToken, setGithubToken] = useState("");
   const [geminiApiKey, setGeminiApiKey] = useState("");
   const [linkedinText, setLinkedinText] = useState("");
@@ -19,6 +25,376 @@ const Hero: React.FC<HeroProps> = ({ onStart, state, errorMessage }) => {
   const [formError, setFormError] = useState("");
   const [showGithubToken, setShowGithubToken] = useState(false);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [importError, setImportError] = useState("");
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const [isProcessingPdf, setIsProcessingPdf] = useState(false);
+  const fileReaderRef = React.useRef<FileReader | null>(null);
+  const pdfAbortControllerRef = React.useRef<AbortController | null>(null);
+
+  // Cleanup on unmount
+  React.useEffect(() => {
+    return () => {
+      // Abort any ongoing file read
+      if (fileReaderRef.current && fileReaderRef.current.readyState === 1) {
+        fileReaderRef.current.abort();
+      }
+      // Abort any ongoing PDF processing
+      if (pdfAbortControllerRef.current) {
+        pdfAbortControllerRef.current.abort();
+        pdfAbortControllerRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Clear previous errors
+    setImportError("");
+
+    const isJson = file.name.toLowerCase().endsWith(".json");
+    const isPdf = file.name.toLowerCase().endsWith(".pdf");
+
+    // Validate file type
+    if (!isJson && !isPdf) {
+      setImportError("Please upload a JSON or PDF file");
+      return;
+    }
+
+    // Validate file size (max 10MB for PDF, 5MB for JSON)
+    const maxSize = isPdf ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      setImportError(`File too large (max ${isPdf ? "10" : "5"}MB)`);
+      return;
+    }
+
+    if (isJson) {
+      handleJsonUpload(file);
+    } else if (isPdf) {
+      await handlePdfUpload(file);
+    }
+
+    // Reset input so same file can be uploaded again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const handleJsonUpload = (file: File) => {
+    // Clear previous errors
+    setImportError("");
+
+    // Abort any previous read operation
+    if (fileReaderRef.current && fileReaderRef.current.readyState === 1) {
+      fileReaderRef.current.abort();
+    }
+
+    const reader = new FileReader();
+    fileReaderRef.current = reader;
+
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+
+        // Validate content exists
+        if (!content || content.trim().length === 0) {
+          setImportError("JSON file is empty");
+          fileReaderRef.current = null;
+          return;
+        }
+
+        // Validate content size (max 1MB for JSON)
+        if (content.length > 1024 * 1024) {
+          setImportError("JSON file too large (max 1MB)");
+          fileReaderRef.current = null;
+          return;
+        }
+
+        const resumeData = JSON.parse(content);
+
+        // Basic validation
+        if (!resumeData.fullName || !resumeData.title) {
+          setImportError(
+            "Invalid resume format: missing required fields (fullName, title)",
+          );
+          fileReaderRef.current = null;
+          return;
+        }
+
+        // Validate structure
+        if (resumeData.education && !Array.isArray(resumeData.education)) {
+          setImportError("Invalid resume format: education must be an array");
+          fileReaderRef.current = null;
+          return;
+        }
+        if (resumeData.experience && !Array.isArray(resumeData.experience)) {
+          setImportError("Invalid resume format: experience must be an array");
+          fileReaderRef.current = null;
+          return;
+        }
+        if (resumeData.projects && !Array.isArray(resumeData.projects)) {
+          setImportError("Invalid resume format: projects must be an array");
+          fileReaderRef.current = null;
+          return;
+        }
+
+        setImportError("");
+        fileReaderRef.current = null;
+        onImportResume(resumeData);
+      } catch (error: any) {
+        const errorMsg = error?.message?.includes("JSON")
+          ? "Invalid JSON format. Please ensure the file is valid JSON."
+          : "Failed to parse JSON file. Please ensure it's a valid resume export.";
+        setImportError(errorMsg);
+        fileReaderRef.current = null;
+      }
+    };
+
+    reader.onerror = () => {
+      setImportError("Failed to read file. Please try again.");
+      fileReaderRef.current = null;
+    };
+
+    reader.onabort = () => {
+      fileReaderRef.current = null;
+    };
+
+    reader.readAsText(file);
+  };
+
+  const handlePdfUpload = async (file: File) => {
+    // Check if Gemini API key is available BEFORE starting
+    if (!geminiApiKey || geminiApiKey.trim().length === 0) {
+      setImportError(
+        "Gemini API key required to parse PDF. Please enter your API key below first, then upload your PDF.",
+      );
+      return;
+    }
+
+    setIsProcessingPdf(true);
+    setImportError("");
+
+    // Create abort controller for this request
+    const abortController = new AbortController();
+    pdfAbortControllerRef.current = abortController;
+
+    // Set timeout for PDF processing (90 seconds max)
+    const timeoutId = setTimeout(() => {
+      if (abortController && !abortController.signal.aborted) {
+        abortController.abort();
+        setImportError(
+          "PDF processing timed out. Please try again or use JSON export.",
+        );
+        setIsProcessingPdf(false);
+        pdfAbortControllerRef.current = null;
+      }
+    }, 90000);
+
+    try {
+      // Convert PDF file to base64
+      const arrayBuffer = await file.arrayBuffer();
+      const base64Data = btoa(
+        new Uint8Array(arrayBuffer).reduce(
+          (data, byte) => data + String.fromCharCode(byte),
+          "",
+        ),
+      );
+
+      // Use Gemini AI to parse the PDF directly
+      const { GoogleGenAI } = await import("@google/genai");
+      const genAI = new GoogleGenAI({ apiKey: geminiApiKey.trim() });
+
+      const prompt = `
+Extract all information from this resume PDF and return structured JSON data.
+
+Return ONLY valid JSON matching this structure:
+{
+  "fullName": "string",
+  "title": "string (professional title)",
+  "email": "string",
+  "phone": "string",
+  "location": "string (City, Country)",
+  "linkedinUrl": "string",
+  "githubUrl": "string",
+  "website": "string",
+  "education": [
+    {
+      "institution": "string",
+      "degree": "string",
+      "location": "string",
+      "period": "string"
+    }
+  ],
+  "experience": [
+    {
+      "company": "string",
+      "title": "string",
+      "period": "string",
+      "description": ["array of bullet point strings"]
+    }
+  ],
+  "projects": [
+    {
+      "name": "string",
+      "description": ["array of bullet point strings"],
+      "technologies": ["array of technology strings"],
+      "url": "string",
+      "stars": 0
+    }
+  ],
+  "skills": {
+    "languages": ["array of programming languages"],
+    "frameworks": ["array of frameworks/libraries"],
+    "tools": ["array of tools/platforms/databases"]
+  }
+}
+
+CRITICAL RULES:
+1. Extract ALL information accurately from the PDF
+2. Preserve ALL bullet points exactly as written
+3. If a field is not found, use empty string "" or empty array []
+4. Ensure all URLs include https:// protocol
+5. Parse dates carefully (e.g., "Jan 2020 - Present", "2018 - 2022")
+6. Extract ALL technical skills mentioned
+`;
+
+      const response = await genAI.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
+          {
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  mimeType: "application/pdf",
+                  data: base64Data,
+                },
+              },
+            ],
+          },
+        ],
+        config: {
+          temperature: 0.1,
+        },
+      });
+
+      // Check if aborted before processing response
+      if (abortController.signal.aborted) {
+        return;
+      }
+
+      clearTimeout(timeoutId);
+
+      const responseText = response.text;
+
+      if (!responseText || responseText.trim().length === 0) {
+        throw new Error(
+          "AI returned empty response. Please try again or use JSON export.",
+        );
+      }
+
+      // Clean up response - remove markdown code blocks if present
+      let cleanedText = responseText.trim();
+      if (cleanedText.startsWith("```json")) {
+        cleanedText = cleanedText
+          .replace(/^```json\s*/, "")
+          .replace(/```\s*$/, "");
+      } else if (cleanedText.startsWith("```")) {
+        cleanedText = cleanedText.replace(/^```\s*/, "").replace(/```\s*$/, "");
+      }
+
+      let resumeData;
+      try {
+        resumeData = JSON.parse(cleanedText.trim());
+      } catch (parseError) {
+        throw new Error(
+          "AI returned invalid JSON. Please try again or use JSON export.",
+        );
+      }
+
+      // Basic validation
+      if (!resumeData || typeof resumeData !== "object") {
+        throw new Error(
+          "AI returned invalid data. Please try again or use JSON export.",
+        );
+      }
+
+      if (!resumeData.fullName || !resumeData.title) {
+        throw new Error(
+          "Could not extract name and title from PDF. Please ensure your PDF contains clear resume information, or use JSON export.",
+        );
+      }
+
+      // Check if aborted before updating state
+      if (abortController.signal.aborted) {
+        return;
+      }
+
+      // Success!
+      setImportError("");
+      setIsProcessingPdf(false);
+      pdfAbortControllerRef.current = null;
+      onImportResume(resumeData);
+    } catch (error: any) {
+      // Check if aborted - don't update state if so
+      if (abortController.signal.aborted) {
+        return;
+      }
+
+      clearTimeout(timeoutId);
+
+      let errorMsg = "Failed to parse PDF. ";
+
+      if (
+        error?.message?.includes("API Key") ||
+        error?.message?.includes("API_KEY") ||
+        error?.message?.includes("INVALID_ARGUMENT")
+      ) {
+        errorMsg =
+          "Invalid Gemini API key. Please check your API key and try again.";
+      } else if (
+        error?.message?.includes("quota") ||
+        error?.message?.includes("rate limit") ||
+        error?.message?.includes("429") ||
+        error?.message?.includes("RESOURCE_EXHAUSTED")
+      ) {
+        errorMsg =
+          "API rate limit exceeded. Please wait a moment and try again.";
+      } else if (error?.message?.includes("timeout")) {
+        errorMsg = "Request timed out. Please try again with a smaller PDF.";
+      } else if (
+        error?.message?.includes("invalid JSON") ||
+        error?.message?.includes("JSON") ||
+        error?.message?.includes("parse")
+      ) {
+        errorMsg =
+          "AI returned invalid format. Please try again or use JSON export.";
+      } else if (
+        error?.message?.includes("network") ||
+        error?.message?.includes("fetch") ||
+        error?.message?.includes("Failed to fetch")
+      ) {
+        errorMsg =
+          "Network error. Please check your internet connection and try again.";
+      } else if (error?.message) {
+        const msg = error.message;
+        if (msg.length > 200) {
+          errorMsg = msg.slice(0, 200) + "... Please try JSON export instead.";
+        } else {
+          errorMsg = msg + " Please try JSON export if the issue persists.";
+        }
+      } else {
+        errorMsg =
+          "Unexpected error occurred. Please try again or use JSON export.";
+      }
+
+      setImportError(errorMsg);
+      setIsProcessingPdf(false);
+      pdfAbortControllerRef.current = null;
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,6 +481,72 @@ const Hero: React.FC<HeroProps> = ({ onStart, state, errorMessage }) => {
 
         {!isLoading ? (
           <div className="max-w-md mx-auto w-full">
+            {/* Import Resume Section */}
+            <div className="mb-8 p-6 bg-[#232838] border border-[#3e4559] rounded">
+              <h3 className="text-sm font-bold text-[#F4F4F0] uppercase tracking-wider mb-3">
+                Already Have a Resume?
+              </h3>
+              <p className="text-xs text-[#a0a09a] mb-4">
+                Upload your previously exported resume JSON or any PDF resume to
+                edit it. <strong className="text-[#D4A15A]">Tip:</strong> JSON
+                export is more reliable than PDF for complex resumes.
+              </p>
+
+              {/* Show API key requirement for PDF uploads */}
+              {!geminiApiKey.trim() && (
+                <div className="mb-3 p-3 bg-[#D4A15A]/10 border-l-4 border-[#D4A15A] text-[#D4A15A] text-xs">
+                  <strong>Note:</strong> PDF parsing requires a Gemini API key.
+                  Please enter your API key below first, or upload a JSON file.
+                </div>
+              )}
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json,.pdf"
+                onChange={handleFileUpload}
+                className="hidden"
+                id="resume-upload"
+                disabled={isProcessingPdf || isLoading}
+              />
+              <label
+                htmlFor="resume-upload"
+                className={`block w-full bg-[#768068] hover:bg-[#5f6854] text-white font-serif font-bold py-3 px-6 text-center transition-colors ${
+                  isProcessingPdf || isLoading
+                    ? "opacity-50 cursor-not-allowed"
+                    : "cursor-pointer"
+                }`}
+              >
+                {isProcessingPdf
+                  ? "⏳ Processing PDF..."
+                  : isLoading
+                    ? "⏳ Please wait..."
+                    : "📁 Upload Resume (JSON or PDF)"}
+              </label>
+              {importError && (
+                <div className="mt-3 p-3 bg-[#EF5350]/10 border-l-4 border-[#EF5350] text-[#EF5350] text-xs">
+                  {importError}
+                </div>
+              )}
+              {isProcessingPdf && (
+                <div className="mt-3 p-3 bg-[#D4A15A]/10 border-l-4 border-[#D4A15A] text-[#D4A15A] text-xs">
+                  Extracting text from PDF and parsing with AI... This may take
+                  10-20 seconds.
+                </div>
+              )}
+            </div>
+
+            <div className="relative mb-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-[#3e4559]"></div>
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-[#1f2330] px-2 text-[#5c637a]">
+                  Or Generate New
+                </span>
+              </div>
+            </div>
+
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
                 <label className="block text-xs font-bold text-[#F4F4F0] uppercase tracking-wider mb-2">
@@ -121,6 +563,7 @@ const Hero: React.FC<HeroProps> = ({ onStart, state, errorMessage }) => {
                     }
                     required
                     maxLength={500}
+                    disabled={isLoading}
                   />
                   <button
                     type="button"
@@ -151,6 +594,7 @@ const Hero: React.FC<HeroProps> = ({ onStart, state, errorMessage }) => {
                     }
                     required
                     maxLength={500}
+                    disabled={isLoading}
                   />
                   <button
                     type="button"
@@ -186,6 +630,7 @@ const Hero: React.FC<HeroProps> = ({ onStart, state, errorMessage }) => {
                     setLinkedinText(e.target.value.slice(0, 50000))
                   }
                   maxLength={50000}
+                  disabled={isLoading}
                 />
                 <p className="text-[10px] text-[#5c637a] mt-2 text-right">
                   {linkedinText.length.toLocaleString()} / 50,000 characters
@@ -194,11 +639,13 @@ const Hero: React.FC<HeroProps> = ({ onStart, state, errorMessage }) => {
 
               <button
                 type="submit"
-                disabled={!githubToken.trim() || !geminiApiKey.trim()}
+                disabled={
+                  !githubToken.trim() || !geminiApiKey.trim() || isLoading
+                }
                 className="w-full bg-[#EF5350] hover:bg-[#D34542] text-white font-serif font-bold py-5 px-8 shadow-lg transition-transform transform active:translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed flex justify-between items-center group"
                 aria-label="Generate resume from GitHub data"
               >
-                <span>GENERATE RESUME</span>
+                <span>{isLoading ? "GENERATING..." : "GENERATE RESUME"}</span>
                 <span
                   className="group-hover:translate-x-1 transition-transform"
                   aria-hidden="true"

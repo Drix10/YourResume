@@ -283,6 +283,12 @@ CRITICAL: Each bullet MUST contain:
    - Prioritize: qualityScore, commits > 100, complexity='complex', hasMetrics=true, hasDemo=true
    - USE the enriched data to write ACCURATE, IMPRESSIVE, REAL descriptions
    
+   **CRITICAL: NO DUPLICATION WITH EXPERIENCE SECTION**
+   - If a project was already mentioned in the Experience section (as work done at a company), DO NOT include it in Projects
+   - Projects section should ONLY contain: personal projects, side projects, open-source contributions, academic projects
+   - Work projects belong ONLY in Experience section
+   - Check project names, technologies, and descriptions against Experience entries to avoid any overlap
+   
    **CRITICAL: MERGE RELATED REPOSITORIES INTO SINGLE PROJECTS**
    - DETECT repositories that are part of the SAME product/project (e.g., "idolchat", "idolchat-app", "idolchat-backend")
    - Common patterns: [name], [name]-frontend, [name]-backend, [name]-api, [name]-app, [name]-mobile, [name]-web, [name]-server, [name]-client
@@ -477,10 +483,13 @@ const sanitizeUserPrompt = (prompt: string): string => {
   sanitized = sanitized
     .replace(/```/g, '') // Remove code blocks
     .replace(/\n{3,}/g, '\n\n') // Limit consecutive newlines
-    .replace(/^(system|assistant|user):/gim, '') // Remove role prefixes
+    .replace(/^(system|assistant|user|model):/gim, '') // Remove role prefixes
     .replace(/\[INST\]|\[\/INST\]/gi, '') // Remove instruction markers
     .replace(/<\|.*?\|>/g, '') // Remove special tokens
     .replace(/<<.*?>>/g, '') // Remove template markers
+    .replace(/\{%.*?%\}/g, '') // Remove template tags
+    .replace(/<%.*?%>/g, '') // Remove ERB-style tags
+    .replace(/\$\{.*?\}/g, '') // Remove template literals
     .trim();
 
   return sanitized;
@@ -576,6 +585,7 @@ USER INSTRUCTION:
    - Projects: Find in REPOSITORIES, create 2-3 impactful bullets using WHO/CAN/TRP frameworks
    - Experience: Use frameworks above with specific technologies and metrics
    - Skills: Add to appropriate category (languages/frameworks/tools)
+   - **CRITICAL**: If adding a project, ensure it's NOT already mentioned in Experience section (no work projects in Projects section)
 
 5. BULLET POINT REQUIREMENTS:
    - Start with strong ACTION VERB

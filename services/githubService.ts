@@ -276,6 +276,7 @@ const fetchFileContent = async (
 
     return null;
   } catch (error: any) {
+    clearTimeout(timeoutId); // FIXED: Clear timeout on error
     if (error.name === 'AbortError') {
       console.warn(`Timeout fetching ${path}`);
     }
@@ -679,6 +680,7 @@ const fetchCommitCount = async (
 
     return { total, userContributions };
   } catch (error: any) {
+    clearTimeout(timeoutId); // FIXED: Clear timeout on error
     if (error.name === 'AbortError') {
       console.warn(`Timeout fetching commits for ${owner}/${repo}`);
     } else {
@@ -721,6 +723,7 @@ const fetchLanguages = async (
     }
     return data;
   } catch (error: any) {
+    clearTimeout(timeoutId); // FIXED: Clear timeout on error
     if (error.name === 'AbortError') {
       console.warn(`Timeout fetching languages for ${owner}/${repo}`);
     }
@@ -934,6 +937,7 @@ export const validateToken = async (token: string): Promise<GitHubUser> => {
 
     clearTimeout(timeoutId);
   } catch (error: any) {
+    clearTimeout(timeoutId); // FIXED: Clear timeout on error
     if (error.name === 'AbortError') {
       throw new Error('Request timed out. Please check your internet connection and try again.');
     }
@@ -985,6 +989,7 @@ export const fetchAllRepos = async (token: string, username: string): Promise<Gi
 
       clearTimeout(timeoutId);
     } catch (error: any) {
+      clearTimeout(timeoutId); // FIXED: Clear timeout on error
       if (error.name === 'AbortError') {
         console.warn(`Timeout fetching repos page ${page}`);
         if (repos.length > 0) break; // Return what we have
@@ -1038,6 +1043,7 @@ export const fetchAllRepos = async (token: string, username: string): Promise<Gi
             break;
           }
         } catch (fallbackError: any) {
+          clearTimeout(fallbackTimeoutId); // FIXED: Clear timeout on error
           if (fallbackError.name === 'AbortError') {
             console.warn("Timeout in fallback repo fetch");
           } else {

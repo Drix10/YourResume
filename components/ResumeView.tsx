@@ -22,20 +22,30 @@ interface ResumeViewProps {
     geminiApiKey: string;
   };
   onReset: () => void;
+  onUpdateApiKey?: (apiKey: string) => void;
 }
 
-const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
+const ResumeView: React.FC<ResumeViewProps> = ({
+  data,
+  context,
+  onReset,
+  onUpdateApiKey,
+}) => {
   const [resume, setResume] = useState<ResumeData>(data);
   const [isEditing, setIsEditing] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
+  const [showApiKeyPrompt, setShowApiKeyPrompt] = useState(false);
+  const [tempApiKey, setTempApiKey] = useState("");
   const [isAiProcessing, setIsAiProcessing] = useState(false);
   const [showPrintInstructions, setShowPrintInstructions] = useState(false);
   const [aiError, setAiError] = useState("");
   const [aiSuccess, setAiSuccess] = useState(false);
   const printTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const lastAiRequestRef = React.useRef<number>(0);
-  const modalRef = React.useRef<HTMLDivElement>(null);
+  const modalRef = React.useRef<HTMLDivElement | null>(null);
+  const apiKeyModalRef = React.useRef<HTMLDivElement | null>(null);
   const successTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const pendingRetryRef = React.useRef<boolean>(false);
 
   useEffect(() => {
     setResume(data);
@@ -57,14 +67,17 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
     };
   }, []);
 
-  // Focus trap and keyboard handling for modal
+  // Focus trap and keyboard handling for print modal
   useEffect(() => {
     if (!showPrintInstructions || !modalRef.current) {
       return;
     }
 
-    const focusableElements = modalRef.current.querySelectorAll(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    const modal = modalRef.current;
+    const previousActiveElement = document.activeElement as HTMLElement;
+
+    const focusableElements = modal.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
     );
     const firstElement = focusableElements[0] as HTMLElement;
     const lastElement = focusableElements[
@@ -95,14 +108,149 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
 
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
+      previousActiveElement?.focus();
     };
   }, [showPrintInstructions]);
+
+  // Focus trap and keyboard handling for API Key modal
+  useEffect(() => {
+    if (!showApiKeyPrompt || !apiKeyModalRef.current) {
+      return;
+    }
+
+    const modal = apiKeyModalRef.current;
+    const previousActiveElement = document.activeElement as HTMLElement;
+
+    const focusableElements = modal.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    const firstElement = focusableElements[0] as HTMLElement;
+    const lastElement = focusableElements[
+      focusableElements.length - 1
+    ] as HTMLElement;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Close on Escape
+      if (e.key === "Escape") {
+        setShowApiKeyPrompt(false);
+        setTempApiKey("");
+        pendingRetryRef.current = false;
+        return;
+      }
+
+      // Focus trap on Tab
+      if (e.key === "Tab") {
+        if (e.shiftKey && document.activeElement === firstElement) {
+          e.preventDefault();
+          lastElement?.focus();
+        } else if (!e.shiftKey && document.activeElement === lastElement) {
+          e.preventDefault();
+          firstElement?.focus();
+        }
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    firstElement?.focus();
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previousActiveElement?.focus();
+    };
+  }, [showApiKeyPrompt]);
+
+  // Handle retry after API key is updated
+  useEffect(() => {
+    if (
+      pendingRetryRef.current &&
+      context.geminiApiKey &&
+      context.geminiApiKey.trim().length > 0 &&
+      aiPrompt.trim().length > 0
+    ) {
+      pendingRetryRef.current = false;
+      // Trigger the AI update with the new API key
+      handleAiUpdate(new Event("submit") as any);
+    }
+  }, [context.geminiApiKey, aiPrompt]);
 
   const [printError, setPrintError] = useState("");
 
   const handlePrint = () => {
     setPrintError("");
     setShowPrintInstructions(true);
+  };
+
+  const handleExportJSON = () => {
+    let url: string | null = null;
+    let link: HTMLAnchorElement | null = null;
+
+    try {
+      // Create a clean copy of the resume data
+      const exportData = {
+        ...resume,
+        // Add metadata
+        exportedAt: new Date().toISOString(),
+        version: "1.0",
+      };
+
+      const dataStr = JSON.stringify(exportData, null, 2);
+      const dataBlob = new Blob([dataStr], { type: "application/json" });
+
+      // Validate blob creation
+      if (!dataBlob || dataBlob.size === 0) {
+        throw new Error("Failed to create export file");
+      }
+
+      url = URL.createObjectURL(dataBlob);
+
+      // Sanitize filename - remove special characters and limit length
+      const sanitizeFilename = (name: string): string => {
+        if (!name || typeof name !== "string" || name.trim().length === 0) {
+          return "Resume";
+        }
+        return name
+          .replace(/[^a-zA-Z0-9\s_-]/g, "") // Remove special chars
+          .replace(/\s+/g, "_") // Replace spaces with underscores
+          .slice(0, 50); // Limit length
+      };
+
+      const filename = `${sanitizeFilename(resume.fullName)}_Resume.json`;
+
+      link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+
+      // Clean up immediately
+      if (link.parentNode) {
+        document.body.removeChild(link);
+      }
+
+      // Clean up the URL object
+      setTimeout(() => {
+        if (url) URL.revokeObjectURL(url);
+      }, 100);
+    } catch (error) {
+      console.error("Failed to export JSON:", error);
+      alert("Failed to export resume. Please try again.");
+
+      // Ensure cleanup even on error
+      if (url) {
+        try {
+          URL.revokeObjectURL(url);
+        } catch (e) {
+          console.error("Failed to revoke URL:", e);
+        }
+      }
+      if (link && link.parentNode) {
+        try {
+          document.body.removeChild(link);
+        } catch (e) {
+          console.error("Failed to remove link:", e);
+        }
+      }
+    }
   };
 
   const proceedToPrint = () => {
@@ -118,8 +266,8 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
     if (!validation.valid) {
       setPrintError(
         `Please fix the following issues before printing:\n${validation.errors.join(
-          "\n"
-        )}`
+          "\n",
+        )}`,
       );
       return;
     }
@@ -156,7 +304,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
     section: "education" | "experience" | "projects",
     index: number,
     field: string,
-    value: any
+    value: any,
   ) => {
     setResume((prev) => {
       const sectionArray = [...(prev[section] as any[])];
@@ -169,7 +317,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
     section: "experience" | "projects",
     itemIndex: number,
     field: "description",
-    value: string
+    value: string,
   ) => {
     const lines = value.split("\n");
     handleNestedChange(section, itemIndex, field, lines);
@@ -177,7 +325,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
 
   const handleSkillChange = (
     category: keyof ResumeData["skills"],
-    value: string
+    value: string,
   ) => {
     const items = value.split(",").map((s) => s.trim());
     setResume((prev) => {
@@ -224,7 +372,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
 
   const removeItem = (
     section: "education" | "experience" | "projects",
-    index: number
+    index: number,
   ) => {
     setResume((prev) => {
       const newArray = [...(prev[section] as any[])];
@@ -245,7 +393,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
 
   const handleDragStart = (
     section: "education" | "experience" | "projects",
-    index: number
+    index: number,
   ) => {
     setDraggedItem({ section, index });
   };
@@ -253,7 +401,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
   const handleDragOver = (
     e: React.DragEvent,
     section: "education" | "experience" | "projects",
-    index: number
+    index: number,
   ) => {
     e.preventDefault();
     // Only show drop indicator if dragging within the same section
@@ -269,7 +417,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
 
   const handleDrop = (
     section: "education" | "experience" | "projects",
-    dropIndex: number
+    dropIndex: number,
   ) => {
     if (!draggedItem || draggedItem.section !== section) {
       handleDragEnd();
@@ -309,10 +457,10 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
     "skills",
   ]);
   const [draggedSection, setDraggedSection] = useState<SectionType | null>(
-    null
+    null,
   );
   const [dragOverSection, setDragOverSection] = useState<SectionType | null>(
-    null
+    null,
   );
 
   const handleSectionDragStart = (section: SectionType) => {
@@ -361,6 +509,13 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
     const trimmedPrompt = aiPrompt.trim();
     if (!trimmedPrompt || isAiProcessing) return;
 
+    // Check if we have a Gemini API key (might be missing for imported resumes)
+    if (!context.geminiApiKey || context.geminiApiKey.trim().length === 0) {
+      // Show API key prompt modal
+      setShowApiKeyPrompt(true);
+      return;
+    }
+
     // Prevent rapid-fire AI requests
     const now = Date.now();
     if (now - lastAiRequestRef.current < TIMING.AI_REQUEST_COOLDOWN) {
@@ -381,7 +536,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
         context.geminiApiKey,
         resume,
         currentPrompt,
-        context
+        context,
       );
 
       // Check if component is still mounted before updating state
@@ -497,12 +652,12 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
     const experienceDesc =
       resume.experience?.reduce(
         (acc, exp) => acc + (exp.description?.length || 0),
-        0
+        0,
       ) || 0;
     const projectsDesc =
       resume.projects?.reduce(
         (acc, proj) => acc + (proj.description?.length || 0),
-        0
+        0,
       ) || 0;
     const totalBullets = experienceDesc + projectsDesc;
     const totalItems =
@@ -628,6 +783,93 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
         </div>
       )}
 
+      {/* API Key Prompt Modal */}
+      {showApiKeyPrompt && (
+        <div
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="api-key-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowApiKeyPrompt(false);
+              setTempApiKey("");
+              pendingRetryRef.current = false;
+            }
+          }}
+        >
+          <div
+            ref={apiKeyModalRef}
+            className="bg-[#1f2330] border-2 border-[#D4A15A] rounded-lg max-w-md w-full p-8 shadow-2xl"
+          >
+            <h2
+              id="api-key-modal-title"
+              className="text-2xl font-serif font-bold text-[#F4F4F0] mb-4"
+            >
+              🔑 Gemini API Key Required
+            </h2>
+            <p className="text-[#a0a09a] mb-6">
+              AI features require a Gemini API key. Enter your key below to
+              enable AI-powered resume editing.
+            </p>
+            <div className="mb-6">
+              <label className="block text-xs font-bold text-[#F4F4F0] uppercase tracking-wider mb-2">
+                Gemini API Key
+              </label>
+              <input
+                type="password"
+                placeholder="AIzaSy..."
+                className="w-full bg-[#181B26] text-[#F4F4F0] border border-[#3e4559] rounded px-4 py-3 focus:outline-none focus:border-[#D4A15A] placeholder-[#5c637a] font-mono text-sm"
+                value={tempApiKey}
+                onChange={(e) => setTempApiKey(e.target.value)}
+                maxLength={500}
+                autoFocus
+              />
+              <p className="text-[10px] text-[#5c637a] mt-2">
+                Get your key at{" "}
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[#D4A15A] hover:underline"
+                >
+                  Google AI Studio
+                </a>
+              </p>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowApiKeyPrompt(false);
+                  setTempApiKey("");
+                  pendingRetryRef.current = false;
+                }}
+                className="px-6 py-3 bg-[#232838] text-[#a0a09a] hover:text-white border border-[#3e4559] rounded font-serif transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (tempApiKey.trim() && onUpdateApiKey) {
+                    onUpdateApiKey(tempApiKey.trim());
+                    setShowApiKeyPrompt(false);
+                    setTempApiKey("");
+                    // Set pending retry flag - the useEffect will handle the actual retry
+                    pendingRetryRef.current = true;
+                  }
+                }}
+                disabled={!tempApiKey.trim()}
+                className="px-6 py-3 bg-[#D4A15A] hover:bg-[#C29250] text-[#181B26] rounded font-serif font-bold shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Save & Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-[210mm] mx-auto mb-6 flex flex-col gap-4 no-print sticky top-0 z-[200] bg-[#181B26]/95 backdrop-blur py-4 px-2 rounded-b-lg border-b border-[#2B2B2B]">
         <div className="flex justify-between items-center w-full">
           <div className="flex items-center gap-4">
@@ -636,7 +878,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
               onClick={() => {
                 if (
                   confirm(
-                    "Are you sure you want to create a new resume? All unsaved changes will be lost."
+                    "Are you sure you want to create a new resume? All unsaved changes will be lost.",
                   )
                 ) {
                   onReset();
@@ -662,6 +904,15 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
               }`}
             >
               {isEditing ? "Finish Editing" : "Edit Content"}
+            </button>
+            <button
+              type="button"
+              onClick={handleExportJSON}
+              className="bg-[#768068] hover:bg-[#5f6854] text-white px-5 py-2 rounded font-serif font-bold shadow-md transition-all text-sm active:translate-y-0.5"
+              aria-label="Export resume as JSON for later editing"
+              title="Download as JSON to edit later"
+            >
+              💾 Export JSON
             </button>
             <button
               type="button"
@@ -694,8 +945,8 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
               isAiProcessing
                 ? "bg-[#D4A15A] text-[#181B26] cursor-wait"
                 : !aiPrompt.trim()
-                ? "bg-[#3e4559] text-[#5c637a] cursor-not-allowed"
-                : "bg-[#D4A15A] hover:bg-[#C29250] text-[#181B26]"
+                  ? "bg-[#3e4559] text-[#5c637a] cursor-not-allowed"
+                  : "bg-[#D4A15A] hover:bg-[#C29250] text-[#181B26]"
             }`}
           >
             {isAiProcessing ? "Refining..." : "AI Refine"}
@@ -1008,7 +1259,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
                                   "education",
                                   idx,
                                   "institution",
-                                  e.target.value
+                                  e.target.value,
                                 )
                               }
                             />
@@ -1026,7 +1277,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
                                   "education",
                                   idx,
                                   "location",
-                                  e.target.value
+                                  e.target.value,
                                 )
                               }
                             />
@@ -1044,7 +1295,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
                                   "education",
                                   idx,
                                   "degree",
-                                  e.target.value
+                                  e.target.value,
                                 )
                               }
                             />
@@ -1060,7 +1311,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
                                   "education",
                                   idx,
                                   "period",
-                                  e.target.value
+                                  e.target.value,
                                 )
                               }
                             />
@@ -1173,7 +1424,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
                                   "experience",
                                   idx,
                                   "company",
-                                  e.target.value
+                                  e.target.value,
                                 )
                               }
                             />
@@ -1191,7 +1442,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
                                   "experience",
                                   idx,
                                   "period",
-                                  e.target.value
+                                  e.target.value,
                                 )
                               }
                             />
@@ -1209,7 +1460,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
                                   "experience",
                                   idx,
                                   "title",
-                                  e.target.value
+                                  e.target.value,
                                 )
                               }
                             />
@@ -1228,7 +1479,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
                                 "experience",
                                 idx,
                                 "description",
-                                e.target.value
+                                e.target.value,
                               )
                             }
                           />
@@ -1348,7 +1599,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
                                       "projects",
                                       idx,
                                       "name",
-                                      e.target.value
+                                      e.target.value,
                                     )
                                   }
                                   placeholder="Project Name"
@@ -1363,7 +1614,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
                                       "technologies",
                                       e.target.value
                                         .split(/,\s*/)
-                                        .filter(Boolean)
+                                        .filter(Boolean),
                                     )
                                   }
                                   placeholder="Tech 1, Tech 2"
@@ -1376,7 +1627,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
                                       "projects",
                                       idx,
                                       "homepage",
-                                      e.target.value
+                                      e.target.value,
                                     )
                                   }
                                   placeholder="Live URL (homepage)"
@@ -1389,7 +1640,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
                                       "projects",
                                       idx,
                                       "url",
-                                      e.target.value
+                                      e.target.value,
                                     )
                                   }
                                   placeholder="GitHub URL"
@@ -1450,7 +1701,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({ data, context, onReset }) => {
                                 "projects",
                                 idx,
                                 "description",
-                                e.target.value
+                                e.target.value,
                               )
                             }
                           />
