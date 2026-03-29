@@ -20,6 +20,7 @@ export const GITHUB_API = {
     MAX_PAGES: 3,
     MAX_REPOS_FOR_CONTEXT: 50,
     TOP_REPOS_FOR_INITIAL: 20,
+    REQUEST_TIMEOUT: 10000,
 } as const;
 
 // Resume scoring
