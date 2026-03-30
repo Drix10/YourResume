@@ -10,7 +10,7 @@ export const RESUME_DENSITY = {
 export const TIMING = {
     PRINT_TITLE_DELAY: 100,
     DEBOUNCE_DELAY: 300,
-    AI_REQUEST_COOLDOWN: 2000,
+    AI_REQUEST_COOLDOWN: 3000,
 } as const;
 
 // GitHub API constants
