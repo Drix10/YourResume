@@ -22,6 +22,7 @@ export const isValidPhone = (phone: string): boolean => {
 };
 
 export const isValidUrl = (url: string): boolean => {
+    if (!url || typeof url !== 'string') return false;
     try {
         const urlObj = new URL(url);
         return urlObj.protocol === 'http:' || urlObj.protocol === 'https:';
