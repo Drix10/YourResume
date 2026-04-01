@@ -4,6 +4,7 @@
 export const RESUME_DENSITY = {
     ULTRA_COMPACT_THRESHOLD: 40,
     COMPACT_THRESHOLD: 25,
+    NORMAL_THRESHOLD: 15,
 } as const;
 
 // Timing constants
