@@ -1,8 +1,9 @@
 // Input validation and sanitization utilities
 
 export const isValidEmail = (email: string): boolean => {
+    if (!email || typeof email !== 'string') return false;
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
+    return emailRegex.test(email.trim());
 };
 
 export const isValidPhone = (phone: string): boolean => {
