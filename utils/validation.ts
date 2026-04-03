@@ -55,10 +55,10 @@ export const sanitizeUrl = (url: string): string => {
 };
 
 export const sanitizeText = (text: string): string => {
-    if (!text) return '';
+    if (!text || typeof text !== 'string') return '';
 
     // Remove any HTML tags
-    return text.replace(/<[^>]*>/g, '');
+    return text.replace(/<[^>]*>/g, '').trim();
 };
 
 export const validateResumeData = (data: Partial<{
