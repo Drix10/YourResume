@@ -45,4 +45,5 @@ export const VALIDATION = {
     MAX_PHONE_LENGTH: 15,
     MAX_EMAIL_LENGTH: 254,
     MAX_URL_LENGTH: 2048,
+    MIN_PASSWORD_LENGTH: 8,
 } as const;
