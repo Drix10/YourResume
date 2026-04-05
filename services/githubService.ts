@@ -1065,6 +1065,11 @@ export const fetchAllRepos = async (token: string, username: string): Promise<Gi
   // CRITICAL FILTERING: Remove repos where user has no meaningful contribution
   // This filters out org repos, famous forks, and repos user didn't actually work on
   const userRelevantRepos = uniqueRepos.filter(repo => {
+    // Skip archived repos
+    if (repo.archived) {
+      return false;
+    }
+
     // Validate repo.full_name exists
     if (!repo.full_name || typeof repo.full_name !== 'string') {
       console.warn(`Missing or invalid repo full_name`);
