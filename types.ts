@@ -20,6 +20,7 @@ export interface GitHubRepo {
   language: string | null;
   forks_count: number;
   topics: string[];
+  archived?: boolean;
 }
 
 export interface EnrichedRepoData extends GitHubRepo {
