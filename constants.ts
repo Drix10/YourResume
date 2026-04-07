@@ -37,6 +37,7 @@ export const PRINT = {
     MARGIN_RIGHT: '15mm',
     MARGIN_BOTTOM: '12mm',
     MARGIN_LEFT: '15mm',
+    DPI: 300,
 } as const;
 
 // Validation
