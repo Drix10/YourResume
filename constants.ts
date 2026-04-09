@@ -28,6 +28,7 @@ export const GITHUB_API = {
 export const RESUME_SCORING = {
     ONE_WEEK_MS: 604800000,
     STAR_WEIGHT_MULTIPLIER: 2,
+    MIN_COMMIT_THRESHOLD: 3,
 } as const;
 
 // Print settings
