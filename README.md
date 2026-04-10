@@ -15,6 +15,7 @@
 - Smart scoring based on commits, code size, complexity — not just stars
 - Parses dependency files from any ecosystem (JS, Python, Go, Rust, Java, Ruby, C++)
 - Auto-detects ML/Data Science projects from Jupyter notebooks
+- Filters out archived and inactive repositories automatically
 - Merges related repos (frontend/backend/mobile) into single project entries
 - Generates ATS-optimized resume with proper keywords
 - Edit inline, refine with AI commands, export to PDF
