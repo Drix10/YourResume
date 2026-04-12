@@ -16,6 +16,9 @@ export const isValidPhone = (phone: string): boolean => {
     const digitCount = cleaned.replace(/\D/g, '').length;
     if (digitCount < 7 || digitCount > 15) return false;
 
+    // Block obviously invalid patterns
+    if (/^0+$/.test(cleaned) || /^1+$/.test(cleaned)) return false;
+
     // Accepts formats: +1234567890, (123) 456-7890, 123-456-7890, etc.
     const phoneRegex = /^[\+]?[0-9]{1,4}[-.\s]?[(]?[0-9]{1,4}[)]?[-.\s]?[0-9]{1,4}[-.\s]?[0-9]{1,9}$/;
     return phoneRegex.test(phone.trim());
