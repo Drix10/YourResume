@@ -338,12 +338,12 @@ CRITICAL RULES:
       pdfAbortControllerRef.current = null;
       onImportResume(resumeData);
     } catch (error: any) {
+      clearTimeout(timeoutId);
+
       // Check if aborted - don't update state if so
       if (abortController.signal.aborted) {
         return;
       }
-
-      clearTimeout(timeoutId);
 
       let errorMsg = "Failed to parse PDF. ";
 

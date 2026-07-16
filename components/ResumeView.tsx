@@ -660,7 +660,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({
     }
 
     // Certifications
-    if (resume.certifications?.length > 0) {
+    if (resume.certifications && resume.certifications.length > 0) {
       totalHeight +=
         SECTION_HEADER_HEIGHT +
         resume.certifications.length * CERTIFICATION_ITEM_HEIGHT;

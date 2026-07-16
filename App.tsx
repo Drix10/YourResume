@@ -266,13 +266,13 @@ const App: React.FC = () => {
         education: Array.isArray(importedData.education)
           ? importedData.education
               .map(validateEducation)
-              .filter((item): item is NonNullable<typeof item> => item !== null)
+              .filter((item: any): item is NonNullable<typeof item> => item !== null)
               .slice(0, 10) // Max 10 education entries
           : [],
         certifications: Array.isArray(importedData.certifications)
           ? importedData.certifications
               .map(validateCertification)
-              .filter((item): item is NonNullable<typeof item> => item !== null)
+              .filter((item: any): item is NonNullable<typeof item> => item !== null)
               .slice(0, 20) // Max 20 certifications
           : [],
         skills: {
@@ -283,13 +283,13 @@ const App: React.FC = () => {
         projects: Array.isArray(importedData.projects)
           ? importedData.projects
               .map(validateProject)
-              .filter((item): item is NonNullable<typeof item> => item !== null)
+              .filter((item: any): item is NonNullable<typeof item> => item !== null)
               .slice(0, 20) // Max 20 projects
           : [],
         experience: Array.isArray(importedData.experience)
           ? importedData.experience
               .map(validateExperience)
-              .filter((item): item is NonNullable<typeof item> => item !== null)
+              .filter((item: any): item is NonNullable<typeof item> => item !== null)
               .slice(0, 20) // Max 20 experience entries
           : [],
       };

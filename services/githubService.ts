@@ -228,9 +228,11 @@ const fetchFileContent = async (
     return null;
   }
 
+  const controller = new AbortController();
+  let timeoutId: any;
+
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     const response = await fetch(
       `${BASE_URL}/repos/${owner}/${repo}/contents/${path}`,
@@ -608,9 +610,11 @@ const fetchCommitCount = async (
   username?: string,
   timeoutMs: number = 10000
 ): Promise<{ total: number; userContributions: number }> => {
+  const controller = new AbortController();
+  let timeoutId: any;
+
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     let allContributors: any[] = [];
     let page = 1;
@@ -697,9 +701,11 @@ const fetchLanguages = async (
   repo: string,
   timeoutMs: number = 5000
 ): Promise<Record<string, number>> => {
+  const controller = new AbortController();
+  let timeoutId: any;
+
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     const response = await fetch(
       `${BASE_URL}/repos/${owner}/${repo}/languages`,
@@ -740,173 +746,211 @@ export const enrichRepoData = async (
 ): Promise<EnrichedRepoData[]> => {
   // Only enrich top repos to avoid rate limits
   const topRepos = repos.slice(0, limit);
+  const enrichedRepos: EnrichedRepoData[] = [];
+  const BATCH_SIZE = 5;
 
-  // Process all repos in parallel (with individual error handling)
-  const enrichmentPromises = topRepos.map(async (repo) => {
-    try {
-      // Safe split with validation
-      const parts = repo.full_name.split('/');
-      if (parts.length < 2) {
-        console.error(`Invalid repo full_name format: ${repo.full_name}`);
-        return { ...repo, enrichedData: undefined };
-      }
-      const owner = parts[0];
-      const repoName = parts.slice(1).join('/'); // Handle edge case of repo names with slashes
+  // Process repos in batches to avoid network congestion and API rate limits
+  for (let i = 0; i < topRepos.length; i += BATCH_SIZE) {
+    const batch = topRepos.slice(i, i + BATCH_SIZE);
 
-      // Fetch multiple data sources in parallel for this repo
-      // Group 1: Core files (always fetch)
-      const [packageJson, requirementsTxt, readme, readmeMd, commitData, languages] = await Promise.all([
-        fetchFileContent(token, owner, repoName, 'package.json'),
-        fetchFileContent(token, owner, repoName, 'requirements.txt'),
-        fetchFileContent(token, owner, repoName, 'README.md'),
-        fetchFileContent(token, owner, repoName, 'readme.md'),
-        fetchCommitCount(token, owner, repoName, username),
-        fetchLanguages(token, owner, repoName),
-      ]);
+    const batchPromises = batch.map(async (repo) => {
+      try {
+        // Safe split with validation
+        const parts = repo.full_name.split('/');
+        if (parts.length < 2) {
+          console.error(`Invalid repo full_name format: ${repo.full_name}`);
+          return { ...repo, enrichedData: undefined };
+        }
+        const owner = parts[0];
+        const repoName = parts.slice(1).join('/'); // Handle edge case of repo names with slashes
 
-      // Group 2: Language-specific files (fetch based on detected languages)
-      const langKeys = Object.keys(languages).map(l => l.toLowerCase());
+        // Fetch multiple data sources in parallel for this repo
+        // Group 1: Core files (always fetch)
+        const [packageJson, requirementsTxt, readme, readmeMd, commitData, languages] = await Promise.all([
+          fetchFileContent(token, owner, repoName, 'package.json'),
+          fetchFileContent(token, owner, repoName, 'requirements.txt'),
+          fetchFileContent(token, owner, repoName, 'README.md'),
+          fetchFileContent(token, owner, repoName, 'readme.md'),
+          fetchCommitCount(token, owner, repoName, username),
+          fetchLanguages(token, owner, repoName),
+        ]);
 
-      // Fetch additional dependency files based on detected languages
-      const additionalFetches: Promise<string | null>[] = [];
-      const fetchTypes: string[] = [];
+        // Group 2: Language-specific files (fetch based on detected languages)
+        const langKeys = Object.keys(languages).map(l => l.toLowerCase());
 
-      // Go
-      if (langKeys.includes('go')) {
-        additionalFetches.push(fetchFileContent(token, owner, repoName, 'go.mod'));
-        fetchTypes.push('goMod');
-      }
-      // Rust
-      if (langKeys.includes('rust')) {
-        additionalFetches.push(fetchFileContent(token, owner, repoName, 'Cargo.toml'));
-        fetchTypes.push('cargoToml');
-      }
-      // Java
-      if (langKeys.includes('java')) {
-        additionalFetches.push(fetchFileContent(token, owner, repoName, 'pom.xml'));
-        additionalFetches.push(fetchFileContent(token, owner, repoName, 'build.gradle'));
-        fetchTypes.push('pomXml', 'buildGradle');
-      }
-      // Ruby
-      if (langKeys.includes('ruby')) {
-        additionalFetches.push(fetchFileContent(token, owner, repoName, 'Gemfile'));
-        fetchTypes.push('gemfile');
-      }
-      // C/C++
-      if (langKeys.includes('c') || langKeys.includes('c++') || langKeys.includes('cmake')) {
-        additionalFetches.push(fetchFileContent(token, owner, repoName, 'CMakeLists.txt'));
-        fetchTypes.push('cmakeLists');
-      }
-      // Python (additional files)
-      if (langKeys.includes('python') || langKeys.includes('jupyter notebook')) {
-        additionalFetches.push(fetchFileContent(token, owner, repoName, 'setup.py'));
-        additionalFetches.push(fetchFileContent(token, owner, repoName, 'pyproject.toml'));
-        fetchTypes.push('setupPy', 'pyprojectToml');
-      }
-      // Jupyter Notebook - try to find one
-      if (langKeys.includes('jupyter notebook')) {
-        // We'll check for common notebook names
-        additionalFetches.push(fetchFileContent(token, owner, repoName, 'main.ipynb', 5000, 5000000));
-        additionalFetches.push(fetchFileContent(token, owner, repoName, 'notebook.ipynb', 5000, 5000000));
-        fetchTypes.push('notebook1', 'notebook2');
-      }
+        // Fetch additional dependency files based on detected languages
+        const additionalFetches: Promise<string | null>[] = [];
+        const fetchTypes: string[] = [];
 
-      const additionalResults = await Promise.all(additionalFetches);
+        // Go
+        if (langKeys.includes('go')) {
+          additionalFetches.push(fetchFileContent(token, owner, repoName, 'go.mod'));
+          fetchTypes.push('goMod');
+        }
+        // Rust
+        if (langKeys.includes('rust')) {
+          additionalFetches.push(fetchFileContent(token, owner, repoName, 'Cargo.toml'));
+          fetchTypes.push('cargoToml');
+        }
+        // Java
+        if (langKeys.includes('java')) {
+          additionalFetches.push(fetchFileContent(token, owner, repoName, 'pom.xml'));
+          additionalFetches.push(fetchFileContent(token, owner, repoName, 'build.gradle'));
+          fetchTypes.push('pomXml', 'buildGradle');
+        }
+        // Ruby
+        if (langKeys.includes('ruby')) {
+          additionalFetches.push(fetchFileContent(token, owner, repoName, 'Gemfile'));
+          fetchTypes.push('gemfile');
+        }
+        // C/C++
+        if (langKeys.includes('c') || langKeys.includes('c++') || langKeys.includes('cmake')) {
+          additionalFetches.push(fetchFileContent(token, owner, repoName, 'CMakeLists.txt'));
+          fetchTypes.push('cmakeLists');
+        }
+        // Python (additional files)
+        if (langKeys.includes('python') || langKeys.includes('jupyter notebook')) {
+          additionalFetches.push(fetchFileContent(token, owner, repoName, 'setup.py'));
+          additionalFetches.push(fetchFileContent(token, owner, repoName, 'pyproject.toml'));
+          fetchTypes.push('setupPy', 'pyprojectToml');
+        }
+        // Jupyter Notebook - try to find one
+        if (langKeys.includes('jupyter notebook')) {
+          // We'll check for common notebook names
+          additionalFetches.push(fetchFileContent(token, owner, repoName, 'main.ipynb', 5000, 5000000));
+          additionalFetches.push(fetchFileContent(token, owner, repoName, 'notebook.ipynb', 5000, 5000000));
+          fetchTypes.push('notebook1', 'notebook2');
+        }
 
-      // Map results to their types
-      const additionalFiles: Record<string, string | null> = {};
-      fetchTypes.forEach((type, i) => {
-        additionalFiles[type] = additionalResults[i];
-      });
+        const additionalResults = await Promise.all(additionalFetches);
 
-      const readmeContent = readme || readmeMd || '';
-      const packageData = packageJson ? parsePackageJson(packageJson) : null;
-      const pythonDeps = requirementsTxt ? parseRequirementsTxt(requirementsTxt) : [];
-      const readmeData = readmeContent ? parseReadme(readmeContent) : {
-        hasDemo: false,
-        hasDocs: false,
-        mentions: [],
-        projectType: 'application',
-        hasMetrics: false,
-        complexity: 'simple' as const
-      };
+        // Map results to their types
+        const additionalFiles: Record<string, string | null> = {};
+        fetchTypes.forEach((type, i) => {
+          additionalFiles[type] = additionalResults[i];
+        });
 
-      // Parse additional dependency files
-      const goDeps = additionalFiles.goMod ? parseGoMod(additionalFiles.goMod) : [];
-      const rustDeps = additionalFiles.cargoToml ? parseCargoToml(additionalFiles.cargoToml) : [];
-      const javaDeps = [
-        ...(additionalFiles.pomXml ? parsePomXml(additionalFiles.pomXml) : []),
-        ...(additionalFiles.buildGradle ? parseBuildGradle(additionalFiles.buildGradle) : []),
-      ];
-      const rubyDeps = additionalFiles.gemfile ? parseGemfile(additionalFiles.gemfile) : [];
-      const cppDeps = additionalFiles.cmakeLists ? parseCMakeLists(additionalFiles.cmakeLists) : [];
-      const setupPyDeps = additionalFiles.setupPy ? parseSetupPy(additionalFiles.setupPy) : [];
-      const pyprojectDeps = additionalFiles.pyprojectToml ? parsePyprojectToml(additionalFiles.pyprojectToml) : [];
+        const readmeContent = readme || readmeMd || '';
+        const packageData = packageJson ? parsePackageJson(packageJson) : null;
+        const pythonDeps = requirementsTxt ? parseRequirementsTxt(requirementsTxt) : [];
+        const readmeData = readmeContent ? parseReadme(readmeContent) : {
+          hasDemo: false,
+          hasDocs: false,
+          mentions: [],
+          projectType: 'application',
+          hasMetrics: false,
+          complexity: 'simple' as const
+        };
 
-      // Parse Jupyter notebooks
-      const notebookContent = additionalFiles.notebook1 || additionalFiles.notebook2;
-      const notebookData = notebookContent ? parseJupyterNotebook(notebookContent) : { imports: [], isML: false, isDataScience: false };
+        // Parse additional dependency files
+        const goDeps = additionalFiles.goMod ? parseGoMod(additionalFiles.goMod) : [];
+        const rustDeps = additionalFiles.cargoToml ? parseCargoToml(additionalFiles.cargoToml) : [];
+        const javaDeps = [
+          ...(additionalFiles.pomXml ? parsePomXml(additionalFiles.pomXml) : []),
+          ...(additionalFiles.buildGradle ? parseBuildGradle(additionalFiles.buildGradle) : []),
+        ];
+        const rubyDeps = additionalFiles.gemfile ? parseGemfile(additionalFiles.gemfile) : [];
+        const cppDeps = additionalFiles.cmakeLists ? parseCMakeLists(additionalFiles.cmakeLists) : [];
+        const setupPyDeps = additionalFiles.setupPy ? parseSetupPy(additionalFiles.setupPy) : [];
+        const pyprojectDeps = additionalFiles.pyprojectToml ? parsePyprojectToml(additionalFiles.pyprojectToml) : [];
 
-      // Detect project type based on dependencies
-      let detectedProjectType = readmeData.projectType;
-      if (notebookData.isML) detectedProjectType = 'ml-project';
-      else if (notebookData.isDataScience) detectedProjectType = 'data-science';
+        // Parse Jupyter notebooks
+        const notebookContent = additionalFiles.notebook1 || additionalFiles.notebook2;
+        const notebookData = notebookContent ? parseJupyterNotebook(notebookContent) : { imports: [], isML: false, isDataScience: false };
 
-      // Calculate language diversity score
-      const languageCount = Object.keys(languages).length;
-      const totalBytes = Object.values(languages).reduce((sum: number, bytes: number) => sum + bytes, 0);
+        // Detect project type based on dependencies
+        let detectedProjectType = readmeData.projectType;
+        if (notebookData.isML) detectedProjectType = 'ml-project';
+        else if (notebookData.isDataScience) detectedProjectType = 'data-science';
 
-      return {
-        ...repo,
-        enrichedData: {
-          packageJson: packageData,
-          pythonDependencies: [...new Set([...pythonDeps, ...setupPyDeps, ...pyprojectDeps])].slice(0, 200),
-          commitCount: commitData.total,
-          userCommitCount: commitData.userContributions,
-          languages,
-          languageCount,
-          totalCodeBytes: totalBytes,
-          readme: {
-            length: readmeContent.length,
-            hasDemo: readmeData.hasDemo,
-            hasDocs: readmeData.hasDocs,
-            techMentions: readmeData.mentions,
-            projectType: detectedProjectType,
-            hasMetrics: readmeData.hasMetrics,
-            complexity: readmeData.complexity,
+        // Calculate language diversity score
+        const languageCount = Object.keys(languages).length;
+        const totalBytes = Object.values(languages).reduce((sum: number, bytes: number) => sum + bytes, 0);
+
+        return {
+          ...repo,
+          enrichedData: {
+            packageJson: packageData,
+            pythonDependencies: [...new Set([...pythonDeps, ...setupPyDeps, ...pyprojectDeps])].slice(0, 200),
+            commitCount: commitData.total,
+            userCommitCount: commitData.userContributions,
+            languages,
+            languageCount,
+            totalCodeBytes: totalBytes,
+            readme: {
+              length: readmeContent.length,
+              hasDemo: readmeData.hasDemo,
+              hasDocs: readmeData.hasDocs,
+              techMentions: readmeData.mentions,
+              projectType: detectedProjectType,
+              hasMetrics: readmeData.hasMetrics,
+              complexity: readmeData.complexity,
+            },
+            // ML/Data Science indicators
+            isMLProject: notebookData.isML,
+            isDataScience: notebookData.isDataScience,
+            // Combine all tech stack info from all ecosystems (limit to prevent memory issues)
+            detectedTechnologies: [
+              ...(packageData?.dependencies || []),
+              ...(packageData?.devDependencies || []),
+              ...pythonDeps,
+              ...setupPyDeps,
+              ...pyprojectDeps,
+              ...goDeps,
+              ...rustDeps,
+              ...javaDeps,
+              ...rubyDeps,
+              ...cppDeps,
+              ...notebookData.imports,
+              ...readmeData.mentions,
+            ].filter((v, i, a) => a.indexOf(v) === i).slice(0, 200), // Unique, max 200
           },
-          // ML/Data Science indicators
-          isMLProject: notebookData.isML,
-          isDataScience: notebookData.isDataScience,
-          // Combine all tech stack info from all ecosystems (limit to prevent memory issues)
-          detectedTechnologies: [
-            ...(packageData?.dependencies || []),
-            ...(packageData?.devDependencies || []),
-            ...pythonDeps,
-            ...setupPyDeps,
-            ...pyprojectDeps,
-            ...goDeps,
-            ...rustDeps,
-            ...javaDeps,
-            ...rubyDeps,
-            ...cppDeps,
-            ...notebookData.imports,
-            ...readmeData.mentions,
-          ].filter((v, i, a) => a.indexOf(v) === i).slice(0, 200), // Unique, max 200
-        },
-      };
-    } catch (error) {
-      // If enrichment fails for a repo, return it without enriched data
-      console.error(`Failed to enrich repo ${repo.name}:`, error);
-      return {
-        ...repo,
-        enrichedData: undefined,
-      };
-    }
-  });
+        };
+      } catch (error) {
+        console.error(`Failed to enrich repo ${repo.name}:`, error);
 
-  // Wait for all enrichments to complete
-  const enrichedRepos = await Promise.all(enrichmentPromises);
+        // Determine if this repo requires contribution verification (org repo or fork)
+        const parts = repo.full_name.split('/');
+        const owner = parts.length >= 2 ? parts[0] : '';
+        const isOwnRepo = owner.toLowerCase().trim() === username.toLowerCase().trim();
+        const requiresVerification = !isOwnRepo || repo.fork;
+
+        if (requiresVerification) {
+          // Propagate with minimal enrichedData so it passes through the scorer's
+          // mandatory commit checks and gets filtered out (since userCommitCount is 0)
+          return {
+            ...repo,
+            enrichedData: {
+              userCommitCount: 0,
+              commitCount: 0,
+              languageCount: 0,
+              totalCodeBytes: 0,
+              languages: {},
+              readme: {
+                length: 0,
+                hasDemo: false,
+                hasDocs: false,
+                techMentions: [],
+                projectType: 'application',
+                hasMetrics: false,
+                complexity: 'simple' as const,
+              },
+              detectedTechnologies: [],
+            },
+          };
+        }
+
+        // Preserve fallback behavior only for repositories that do not require verification (own non-fork repos)
+        return {
+          ...repo,
+          enrichedData: undefined,
+        };
+      }
+    });
+
+    const batchResults = await Promise.all(batchPromises);
+    enrichedRepos.push(...batchResults);
+  }
 
   return enrichedRepos;
 };
@@ -923,9 +967,11 @@ export const validateToken = async (token: string): Promise<GitHubUser> => {
   }
 
   let response: Response;
+  const controller = new AbortController();
+  let timeoutId: any;
+
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
     response = await fetch(`${BASE_URL}/user`, {
       headers: {
@@ -974,10 +1020,11 @@ export const fetchAllRepos = async (token: string, username: string): Promise<Gi
 
   while (page <= MAX_PAGES) {
     let response: Response;
+    const controller = new AbortController();
+    let timeoutId: any;
 
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout per page
+      timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout per page
 
       response = await fetch(`${BASE_URL}/user/repos?per_page=${perPage}&page=${page}&sort=updated&direction=desc`, {
         headers: {
@@ -1020,9 +1067,11 @@ export const fetchAllRepos = async (token: string, username: string): Promise<Gi
     } else {
       // Fallback to public only if /user/repos fails (likely due to scope)
       if (page === 1) {
+        const fallbackController = new AbortController();
+        let fallbackTimeoutId: any;
+
         try {
-          const fallbackController = new AbortController();
-          const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), 15000);
+          fallbackTimeoutId = setTimeout(() => fallbackController.abort(), 15000);
 
           const publicResponse = await fetch(`${BASE_URL}/users/${trimmedUsername}/repos?per_page=${perPage}&page=${page}&sort=updated&direction=desc`, {
             headers: {
@@ -1223,12 +1272,12 @@ export const scoreAndSortRepos = (repos: EnrichedRepoData[], username: string): 
       // More commits = more work invested
       const relevantCommits = isOwnRepo ? totalCommits : userCommits;
 
-      if (relevantCommits > 500) score += 100;
-      else if (relevantCommits > 200) score += 80;
-      else if (relevantCommits > 100) score += 60;
-      else if (relevantCommits > 50) score += 40;
-      else if (relevantCommits > 20) score += 20;
-      else if (relevantCommits > 5) score += 10;
+      if (relevantCommits > 500) score += 200;
+      else if (relevantCommits > 200) score += 150;
+      else if (relevantCommits > 100) score += 100;
+      else if (relevantCommits > 50) score += 75;
+      else if (relevantCommits > 20) score += 50;
+      else if (relevantCommits > 5) score += 20;
 
       // === CODE SIZE & COMPLEXITY ===
       // Larger codebase = more substantial project (with type safety)
@@ -1257,8 +1306,8 @@ export const scoreAndSortRepos = (repos: EnrichedRepoData[], username: string): 
 
       // === PROJECT COMPLEXITY ===
       const complexity = data?.readme?.complexity;
-      if (complexity === 'complex') score += 50;
-      else if (complexity === 'moderate') score += 25;
+      if (complexity === 'complex') score += 100;
+      else if (complexity === 'moderate') score += 50;
 
       // === QUALITY INDICATORS ===
       // Safe array checks with validation
@@ -1273,9 +1322,10 @@ export const scoreAndSortRepos = (repos: EnrichedRepoData[], username: string): 
       // === DEPENDENCY COUNT (indicates complexity) ===
       const techs = Array.isArray(data?.detectedTechnologies) ? data.detectedTechnologies : [];
       const depCount = techs.length;
-      if (depCount > 30) score += 30;
-      else if (depCount > 20) score += 20;
-      else if (depCount > 10) score += 10;
+      if (depCount > 30) score += 120;
+      else if (depCount > 20) score += 80;
+      else if (depCount > 10) score += 40;
+      else if (depCount > 5) score += 20;
 
       // === RECENCY (Recent work is relevant) ===
       // Safe date parsing with validation
@@ -1297,11 +1347,11 @@ export const scoreAndSortRepos = (repos: EnrichedRepoData[], username: string): 
       if (repo.private !== true) {
         // Stars indicate community validation (with type safety)
         const stars = typeof repo.stargazers_count === 'number' ? repo.stargazers_count : 0;
-        if (stars > 100) score += 50;
-        else if (stars > 50) score += 40;
-        else if (stars > 20) score += 30;
-        else if (stars > 10) score += 20;
-        else if (stars > 5) score += 10;
+        if (stars > 100) score += 150;
+        else if (stars > 50) score += 100;
+        else if (stars > 20) score += 75;
+        else if (stars > 10) score += 50;
+        else if (stars > 5) score += 25;
 
         // Forks indicate usefulness (with type safety)
         const forks = typeof repo.forks_count === 'number' ? repo.forks_count : 0;

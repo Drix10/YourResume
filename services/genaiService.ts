@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { GitHubRepo, GitHubUser, ResumeData, EnrichedRepoData } from '../types';
-import { GITHUB_API, RESUME_SCORING } from '../constants';
+import { GITHUB_API } from '../constants';
 
 // Generate UUID with fallback for older browsers
 const generateId = (): string => {
@@ -27,6 +27,7 @@ const resumeSchema: Schema = {
       items: {
         type: Type.OBJECT,
         properties: {
+          id: { type: Type.STRING, description: "Unique item ID. Copy the exact ID character-for-character from the current resume if editing. If creating a new item, omit or leave blank." },
           institution: { type: Type.STRING, description: "University or college name" },
           degree: { type: Type.STRING, description: "Degree type and major (e.g., 'B.S. Computer Science')" },
           location: { type: Type.STRING, description: "City, Country" },
@@ -41,6 +42,7 @@ const resumeSchema: Schema = {
       items: {
         type: Type.OBJECT,
         properties: {
+          id: { type: Type.STRING, description: "Unique item ID. Copy the exact ID character-for-character from the current resume if editing. If creating a new item, omit or leave blank." },
           name: { type: Type.STRING, description: "Certification name (e.g., 'AI Engineering Professional Certificate')" },
           issuer: { type: Type.STRING, description: "Issuing organization (e.g., 'IBM', 'AWS', 'Google')" },
           date: { type: Type.STRING, description: "Issue date or completion date (e.g., 'Jan 2024', '2024')" },
@@ -62,15 +64,16 @@ const resumeSchema: Schema = {
     },
     projects: {
       type: Type.ARRAY,
-      description: "Top 4-6 most impressive projects. Prioritize: starred repos, recently updated, unique/complex projects.",
+      description: "Exactly 2 to 3 most impressive, high-impact projects. Limit this section strictly to keep the entire resume on a single page.",
       items: {
         type: Type.OBJECT,
         properties: {
+          id: { type: Type.STRING, description: "Unique item ID. Copy the exact ID character-for-character from the current resume if editing. If creating a new item, omit or leave blank." },
           name: { type: Type.STRING, description: "Project name (use repo name or cleaned-up version)" },
           description: {
             type: Type.ARRAY,
             items: { type: Type.STRING },
-            description: "2-4 impactful bullet points using WHO/CAN/FOCUS/TRP frameworks. WHO: 'Developed [projectType] using [technologies] resulting in [outcome]'. TRP: 'Implemented [feature] achieving [result] with [metric]'. Each bullet MUST have: action verb + specific technologies from dependencies + measurable outcome."
+            description: "1 to 2 concise, technology-focused, impact-driven bullet points (max 120 characters each). Focus heavily on What was done, How (using specific packages/tools/libraries), and Measurable outcome. Default to 2, but use exactly 1 if requested by the user."
           },
           technologies: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Key technologies used (3-6 items)" },
           url: { type: Type.STRING, description: "Repository or live URL" },
@@ -81,17 +84,18 @@ const resumeSchema: Schema = {
     },
     experience: {
       type: Type.ARRAY,
-      description: "Professional work experience. Extract from LinkedIn first. If none found, infer from GitHub activity (e.g., 'Open Source Contributor' periods).",
+      description: "Exactly 2 to 3 most recent or relevant professional experiences. Limit this section strictly to ensure the resume fits on a single page.",
       items: {
         type: Type.OBJECT,
         properties: {
+          id: { type: Type.STRING, description: "Unique item ID. Copy the exact ID character-for-character from the current resume if editing. If creating a new item, omit or leave blank." },
           title: { type: Type.STRING, description: "Job title" },
           company: { type: Type.STRING, description: "Company or organization name" },
           period: { type: Type.STRING, description: "Date range (e.g., 'Jan 2022 - Present')" },
           description: {
             type: Type.ARRAY,
             items: { type: Type.STRING },
-            description: "2-4 achievement-focused bullets using WHO/CAN/FOCUS/TRP frameworks. WHO: 'Developed [WHAT] using [HOW] resulting in [OUTCOME]'. CAN: '[Challenge] → [Action] → [Numbers]'. TRP: '[Task] achieving [Result] with [Metric]'. Each bullet MUST have: action verb + specific tech + quantifiable outcome."
+            description: "1 to 2 highly concise, technology-focused, and results-driven bullet points (max 120 characters each). Highlight specific achievements, specific packages/tools/libraries used, and quantifiable metrics. Default to 2, but use exactly 1 if requested by the user."
           }
         },
         required: ["title", "company", "period", "description"]
@@ -107,20 +111,40 @@ const formatReposForContext = (repos: GitHubRepo[], limit: number = 50) => {
 
   return repos
     .map(r => {
-      // Safe date parsing with fallback
-      let updateTime = 0;
+      // Calculate days since last update
+      let daysSinceUpdate = 365;
       try {
         const date = new Date(r.updated_at);
-        updateTime = isNaN(date.getTime()) ? 0 : date.getTime();
+        if (!isNaN(date.getTime())) {
+          daysSinceUpdate = (Date.now() - date.getTime()) / (1000 * 60 * 60 * 24);
+        }
       } catch {
-        updateTime = 0;
+        // Use default of 1 year
       }
 
       const stars = typeof r.stargazers_count === 'number' ? r.stargazers_count : 0;
+      const forks = typeof r.forks_count === 'number' ? r.forks_count : 0;
+      const size = typeof r.size === 'number' ? r.size : 0; // Size in KB
+
+      // Score components:
+      // 1. Stars: Extremely high weight (10000 pts per star)
+      // 2. Forks: High weight (2000 pts per fork)
+      // 3. Size: Metric of codebase scale (1 pt per KB, capped at 50000 to prevent massive repos from overwhelming)
+      // 4. Recency: Tie breaker / secondary factor (up to 5000 pts)
+      let recencyScore = 0;
+      if (daysSinceUpdate < 30) recencyScore = 5000;
+      else if (daysSinceUpdate < 90) recencyScore = 3000;
+      else if (daysSinceUpdate < 180) recencyScore = 1500;
+      else if (daysSinceUpdate < 365) recencyScore = 500;
+
+      // Penalize forked repos in pre-sorting to prioritize original work
+      const forkPenalty = r.fork ? -20000 : 0;
+
+      const sortScore = (stars * 10000) + (forks * 2000) + Math.min(size, 50000) + recencyScore + forkPenalty;
 
       return {
         ...r,
-        sortScore: updateTime + (stars * RESUME_SCORING.ONE_WEEK_MS * RESUME_SCORING.STAR_WEIGHT_MULTIPLIER)
+        sortScore
       };
     })
     .sort((a, b) => b.sortScore - a.sortScore)
@@ -203,7 +227,7 @@ export const generateResumeFromGithub = async (
   }));
 
   const prompt = `
-You are an elite ATS-Optimized Resume Writer specializing in tech resumes that pass Applicant Tracking Systems and impress hiring managers at top companies.
+You are an elite ATS-Optimized Resume Writer specializing in high-density, single-page tech resumes.
 
 CANDIDATE DATA:
 ===============
@@ -225,7 +249,30 @@ ${linkedinText || "No additional context provided."}
 
 TASK: Generate an ATS-optimized, professional resume JSON.
 
-=== ATS OPTIMIZATION RULES (CRITICAL) ===
+=== STRICT ONE-PAGE CONSTRAINT & CONCISENESS (CRITICAL) ===
+To guarantee this resume fits perfectly on EXACTLY one page (A4/Letter):
+1. LIMIT professional experience (Experience section) to exactly the top 2-3 most recent or relevant roles.
+2. LIMIT projects (Projects section) to exactly 2-3 of the most relevant or high-scoring projects.
+3. Every bullet point MUST be highly concise (maximum 120 characters per bullet) and fit on a single line when rendered. Avoid wordy explanations, narrative paragraphs, or filler.
+4. Focus heavily on What was done, What technologies/libraries/tools were used, and What the measurable outcome/metric was.
+5. Do not duplicate information between sections.
+
+=== SOPHISTICATED TECHNICAL LINGO & ARCHITECTURAL DEPTH (FACTUAL & VERIFIED ONLY) ===
+Do NOT write simple or basic sentences (e.g., "Built a backend using Node" or "Made a website with React").
+Instead, uplift the lingo to read like a Senior/Principal Engineer, BUT you MUST strictly tie this advanced lingo *only* to the actual verified technologies, languages, and dependencies present in the project's repository data, README files, or LinkedIn history. 
+
+**STRICT ACCURACY RULES (CRITICAL):**
+1. DO NOT assume or invent architectures, frameworks, or database patterns that were never used. If a repository has no Go code, do NOT mention Goroutines. If a repository has no Redis dependency, do NOT claim you built a Redis caching layer.
+2. Read the 'dependencies', 'techStack', 'projectType', and 'complexity' fields of the repository carefully. Match your architectural descriptions character-for-character to these actual files.
+3. If React/Next.js/Vue is used, you may talk about: "optimizing DOM reconciliation cycles", "virtualized list rendering", "reactive state machines", or "component life-cycle/re-render optimizations".
+4. If Node.js is used, you may talk about: "non-blocking asynchronous event loop mechanics", "optimizing event emitters", or "handling async file streams".
+5. If Go is used, you may talk about: "goroutine pooling", "channel-based message structures", or "concurrency flow multiplexing".
+6. If Python or Machine Learning is used, you may talk about: "fine-tuning model weights scaling", "optimizing tensor shapes", "vector similarity queries", or "asynchronous data pipelines".
+7. Any claim of a performance metric (e.g., "reduced latency by 40%", "achieved sub-50ms responses") MUST be reasonable, logical, and directly tied to the technologies used (e.g., only mention caching speedups if the project actually used a cache like Redis, Memcached, or browser localStorage).
+
+Uplift basic phrasing into powerful, high-altitude software engineering lingo, but stay 100% truthful, factual, and anchored in the real code files and dependencies.
+
+=== ATS OPTIMIZATION RULES ===
 1. Use STANDARD section headers: "Education", "Experience", "Projects", "Technical Skills"
 2. NO special characters, emojis, or unicode symbols
 3. Use FULL technology names first, then abbreviations: "JavaScript (JS)", "Amazon Web Services (AWS)"
@@ -234,29 +281,29 @@ TASK: Generate an ATS-optimized, professional resume JSON.
 6. Spell out acronyms on first use
 7. Use standard date formats: "Jan 2023 - Present" or "2021 - 2023"
 
-=== LRBT/ATS BULLET POINT FRAMEWORKS (MANDATORY) ===
+=== LRBT/ATS BULLET POINT FRAMEWORKS ===
 Every bullet point MUST follow ONE of these proven frameworks for maximum ATS/LRBT scoring:
 
 **WHO Framework** (What you did, How you did it, Outcome achieved):
 - "Developed [WHAT] using [HOW/technologies] resulting in [OUTCOME with metrics]"
-- Example: "Developed real-time notification system using WebSockets and Redis, reducing user response latency by 60%"
+- Example: "Developed real-time notification system using WebSockets and Redis, reducing latency by 60%"
 
 **CAN Framework** (Challenge, Action, Numbers/Results):
 - "[CHALLENGE faced] → [ACTION taken] → [NUMBERS/measurable result]"
-- Example: "Faced scaling bottleneck with 10K concurrent users → Implemented horizontal scaling with Kubernetes → Achieved 99.9% uptime handling 100K+ users"
+- Example: "Scaling bottleneck with 10K users → Implemented horizontal scaling with Kubernetes → Achieved 99.9% uptime"
 
 **FOCUS Framework** (Format, Outcome, Clarity, Uniqueness, Structure):
 - Clear action verb + unique contribution + structured outcome
-- Example: "Architected microservices migration strategy, reducing deployment time from 2 hours to 15 minutes while maintaining zero-downtime releases"
+- Example: "Architected microservices migration using Go and Kafka, reducing deployment time from 2 hours to 15 minutes"
 
 **TRP Framework** (Task, Result, Performance metric):
 - "[TASK] achieving [RESULT] with [PERFORMANCE METRIC]"
 - Example: "Optimized database queries achieving 3x faster page loads with 40% reduction in server costs"
 
 CRITICAL: Each bullet MUST contain:
-- Strong ACTION VERB (Developed, Architected, Implemented, Optimized, Led, Designed, Built, Engineered, Automated, Streamlined)
-- SPECIFIC technologies/tools used
-- QUANTIFIABLE outcome (%, numbers, time saved, scale handled, cost reduction)
+- Strong ACTION VERB
+- SPECIFIC technologies/tools/packages used (no generic descriptions)
+- QUANTIFIABLE outcome/metric (%, numbers, scale, time saved, cost reduction)
 
 === SECTION GUIDELINES ===
 
@@ -264,136 +311,32 @@ CRITICAL: Each bullet MUST contain:
    - Use industry-standard titles that ATS recognizes
    - Format: "[Seniority] [Specialization] [Engineer/Developer]"
    - Good: "Senior Software Engineer", "Full Stack Developer", "Backend Engineer"
-   - Avoid: Creative titles like "Code Ninja", "Tech Wizard"
 
 2. EDUCATION:
-   - Extract ONLY from LinkedIn text or GitHub bio
-   - DO NOT fabricate - return empty array if none found
-   - Format: Institution, Degree, Location, Period
-   - Include GPA only if 3.5+ or honors/awards
+   - Extract ONLY from LinkedIn text or GitHub bio (DO NOT fabricate)
+   - Limit to top 1-2 entries.
 
 3. CERTIFICATIONS & LICENSES:
-   - Extract from LinkedIn text (look for "Licenses & certifications" section)
-   - Include: Certification name, Issuing organization, Date, Credential ID, Credential URL
-   - DO NOT fabricate - return empty array if none found
-   - Examples: "AWS Certified Solutions Architect", "Google Cloud Professional", "IBM AI Engineering"
-   - Keep credential IDs and URLs if mentioned
+   - Extract from LinkedIn text (DO NOT fabricate)
+   - Limit to top 2-3 most relevant items.
 
 4. EXPERIENCE:
-   - PRIMARY: Extract from LinkedIn (company, title, dates, achievements)
-   - FALLBACK: "Open Source Developer" or "Freelance Software Engineer" based on GitHub activity
-   - BULLET FORMAT (Use WHO/CAN/FOCUS/TRP frameworks):
-     * WHO: "Developed [WHAT] using [HOW] resulting in [OUTCOME]"
-     * CAN: "[Challenge] → [Action] → [Numbers/Results]"
-     * FOCUS: Clear verb + unique contribution + structured outcome
-     * TRP: "[Task] achieving [Result] with [Performance metric]"
-   - MANDATORY ELEMENTS per bullet:
-     * Strong ACTION VERB (Developed, Implemented, Architected, Optimized, Led, Designed, Engineered, Automated)
-     * SPECIFIC technologies/tools (not generic terms)
-     * QUANTIFIABLE outcome (%, $, time, scale, users, requests)
-   - Examples using frameworks:
-     * WHO: "Developed microservices architecture using Go and gRPC, reducing inter-service latency by 75%"
-     * CAN: "Addressed 500ms API latency → Implemented Redis caching layer → Achieved sub-50ms response times"
-     * TRP: "Migrated legacy monolith to Kubernetes achieving 99.99% uptime with 60% infrastructure cost reduction"
-   - 3-5 bullets per role, most impactful first
-   - Include technologies used in each bullet naturally
+   - Extract from LinkedIn or fallback to Open Source Contributor.
+   - Limit to exactly 2-3 most recent or relevant roles.
+   - Exactly 1 to 2 highly concise bullet points per role (max 120 characters each). Default to 2 bullet points, but use exactly 1 if asked. Focus strictly on What was done, specific packages/libraries/tools used, and measurable outcome.
 
-5. PROJECTS (USE DEEP ANALYSIS DATA - THIS IS CRITICAL):
-   - Repos are ALREADY SORTED by qualityScore (considers commits, code size, complexity, tests, docs)
-   - Select 3-5 BEST projects from the top of the list
-   - PRIVATE REPOS with high commits are often MORE impressive than public repos with stars
-   - Prioritize: qualityScore, commits > 100, complexity='complex', hasMetrics=true, hasDemo=true
-   - USE the enriched data to write ACCURATE, IMPRESSIVE, REAL descriptions
-   
-   **CRITICAL: NO DUPLICATION WITH EXPERIENCE SECTION**
-   - If a project was already mentioned in the Experience section (as work done at a company), DO NOT include it in Projects
-   - Projects section should ONLY contain: personal projects, side projects, open-source contributions, academic projects
-   - Work projects belong ONLY in Experience section
-   - Check project names, technologies, and descriptions against Experience entries to avoid any overlap
-   
-   **CRITICAL: MERGE RELATED REPOSITORIES INTO SINGLE PROJECTS**
-   - DETECT repositories that are part of the SAME product/project (e.g., "idolchat", "idolchat-app", "idolchat-backend")
-   - Common patterns: [name], [name]-frontend, [name]-backend, [name]-api, [name]-app, [name]-mobile, [name]-web, [name]-server, [name]-client
-   - When you find related repos (same base name with suffixes), MERGE them into ONE project entry
-   - Use the base product name (e.g., "idolchat" not "idolchat-backend")
-   - Combine ALL technologies from all related repos into the technologies array
-   - Write bullets that describe the FULL product, mentioning frontend/backend/mobile components
-   - Use the HIGHEST star count and combine all URLs (use homepage if available, otherwise main repo)
-   
-   **MERGE EXAMPLE:**
-   Instead of 3 separate projects:
-   - "idolchat" (landing page)
-   - "idolchat-app" (mobile app)
-   - "idolchat-backend" (API)
-   
-   Create ONE project:
-   - Name: "idolchat"
-   - Technologies: [React.js, Next.js, TypeScript, CSS, React Native, Expo, Node.js, Express.js, Google Generative AI, Prisma, LibSQL, bcryptjs]
-   - Bullets:
-     * "Developed full-stack chat application with React/Next.js landing page, React Native mobile app, and Node.js/Express backend API"
-     * "Integrated Google Generative AI for advanced AI capabilities and implemented secure authentication with bcryptjs"
-     * "Architected scalable backend using Prisma ORM with LibSQL, supporting real-time chat and media sharing across web and mobile platforms"
-   
-   **MANDATORY RULES FOR PROJECT DESCRIPTIONS:**
-   - Use ACTUAL dependencies from the 'dependencies' array (these are REAL packages extracted from package.json, requirements.txt, go.mod, Cargo.toml, pom.xml, build.gradle, Gemfile, CMakeLists.txt, Jupyter notebooks, etc.)
-   - Mention projectType (e.g., "full-stack application", "REST API", "CLI tool", "library", "ml-project", "data-science")
-   - If hasTests=true → "comprehensive test suite" or "test-driven development"
-   - If hasBuild=true → "production-ready build pipeline"
-   - If hasLint=true → "enforced code quality standards"
-   - If hasDemo=true → "deployed live at [homepage]" or "production deployment"
-   - If hasDocs=true → "comprehensive documentation"
-   - If hasMetrics=true → extract and use the actual numbers from README
-   - If complexity='complex' → emphasize architecture, scalability, advanced patterns
-   - If stars > 10 → mention community adoption
-   - If forks > 5 → mention open-source contribution
-   - If isMLProject=true → emphasize ML frameworks (TensorFlow, PyTorch, scikit-learn), model training, inference, accuracy metrics
-   - If isDataScience=true → emphasize data analysis, visualization (pandas, matplotlib, seaborn), statistical methods
-   
-   **LANGUAGE-SPECIFIC EXAMPLES:**
-   - Go: "Built high-performance microservice using Go, Gin, and GORM with PostgreSQL, handling 50K+ requests/second"
-   - Rust: "Developed memory-safe CLI tool using Rust, Clap, and Tokio for async file processing with zero runtime errors"
-   - Java: "Architected enterprise REST API using Spring Boot, Hibernate, and Maven with comprehensive JUnit test coverage"
-   - C++: "Implemented real-time graphics engine using C++17, OpenGL, and CMake with 60fps rendering performance"
-   - Ruby: "Built scalable web application using Ruby on Rails, PostgreSQL, and Sidekiq for background job processing"
-   - ML/AI: "Trained transformer-based NLP model using PyTorch and Hugging Face, achieving 94% accuracy on sentiment classification"
-   - Data Science: "Analyzed 1M+ records using pandas and NumPy, created interactive dashboards with Plotly and Streamlit"
-   
-   **DESCRIPTION FORMULA (Use WHO/CAN/FOCUS/TRP frameworks):**
-   Bullet 1 (WHO): "Developed [projectType] using [3-5 ACTUAL dependencies] resulting in [outcome/scale]"
-   Bullet 2 (TRP): "Implemented [key feature] achieving [result] with [performance metric from README or inferred]"
-   Bullet 3 (CAN): "[Challenge addressed] → [Technical solution with specific tech] → [Quantifiable impact]"
-   
-   **MANDATORY: Every bullet MUST have:**
-   - Action verb (Developed, Built, Architected, Implemented, Engineered, Designed, Optimized, Automated)
-   - Specific technologies from the dependencies array
-   - Measurable outcome (metrics from README, stars/forks, deployment status, inferred scale)
-   
-   **BE SPECIFIC AND ACCURATE**: Only mention technologies that appear in the dependencies array or techStack
+5. PROJECTS (USE DEEP ANALYSIS DATA):
+   - Repos are sorted by qualityScore. Select EXACTLY 2-3 BEST projects.
+   - **CRITICAL: NO DUPLICATION WITH EXPERIENCE SECTION**
+   - **CRITICAL: MERGE RELATED REPOSITORIES INTO SINGLE PROJECTS** (e.g. merge [name]-frontend and [name]-backend into [name]). Combine technologies and describe the full product.
+   - **MANDATORY RULES FOR PROJECT DESCRIPTIONS:**
+     * Use ACTUAL dependencies from the dependencies array (specific packages/libraries from package.json, requirements.txt, go.mod, Cargo.toml, etc.).
+     * Exactly 1 to 2 bullet points per project. Limit each bullet point to a maximum of 120 characters. Default to 2 bullet points, but use exactly 1 if requested by the user. Focus heavily on technologies used and quantifiable results.
+     * Bullet 1: "Developed [projectType] using [3-4 actual dependencies] resulting in [outcome]"
+     * Bullet 2: "Implemented [key feature] achieving [result] with [performance/deployment status]" (Omit this bullet if generating exactly 1 bullet point per project).
 
-6. TECHNICAL SKILLS (ATS-Critical):
-   - Languages: List ALL programming languages from repos (JavaScript, TypeScript, Python, Java, etc.)
-   - Frameworks: React, Node.js, Express, Django, Spring Boot, etc.
-   - Tools & Platforms: Git, Docker, Kubernetes, AWS, GCP, Azure, CI/CD, databases
-   - Format as comma-separated lists for ATS parsing
-
-=== QUALITY STANDARDS ===
-- Every bullet MUST follow WHO, CAN, FOCUS, or TRP framework
-- Every bullet MUST have a measurable outcome or clear impact
-- Use numbers: "50% faster", "10K users", "99.9% uptime", "3x improvement", "$50K saved"
-- NO generic phrases: "responsible for", "worked on", "helped with", "assisted in"
-- NO first person (I, my, we)
-- Keep bullets concise: 1-2 lines max
-- Prioritize recent and relevant experience
-- Technical depth over breadth
-- ATS-friendly formatting
-
-=== LRBT COMPATIBILITY CHECKLIST ===
-Before finalizing, verify each bullet has:
-✓ Strong action verb at the start
-✓ Specific technology/tool mentioned
-✓ Quantifiable result or clear business impact
-✓ Follows WHO/CAN/FOCUS/TRP structure
-✓ No vague language or filler words
+6. TECHNICAL SKILLS:
+   - Categorize into Languages, Frameworks, and Tools. Format as comma-separated lists.
 
 Output strictly valid JSON matching the schema.
   `;
@@ -561,34 +504,59 @@ You are an ATS-Optimized Resume Editor making precise, targeted edits while main
 CURRENT RESUME:
 ${JSON.stringify(currentResume, null, 2)}
 
-AVAILABLE REPOSITORIES (for adding projects):
+AVAILABLE REPOSITORIES (for adding projects/skills):
 ${JSON.stringify(relevantRepos, null, 2)}
 
 ENRICHED REPOSITORY DATA (with package.json/README analysis):
 ${JSON.stringify(enrichedRepoContext, null, 2)}
 
+LINKEDIN / ADDITIONAL CONTEXT (Full copy):
+${context.linkedinText || "No additional context provided."}
+
 USER CONTEXT:
 - Name: ${context.user.name || context.user.login}
 - Bio: ${context.user.bio || 'N/A'}
-- LinkedIn/Extra: ${context.linkedinText || 'N/A'}
 
 USER INSTRUCTION:
 "${sanitizedPrompt}"
 
+=== STRICT ONE-PAGE CONSTRAINT & CONCISENESS (CRITICAL) ===
+The entire resume MUST fit perfectly on EXACTLY one page (A4/Letter).
+1. LIMITS ON QUANTITY: The 2-3 role limit in the Experience section and 2-3 project limit in the Projects section apply ONLY if the user explicitly requests to condense the resume or specifically asks to edit/truncate/add items in those respective sections.
+2. PRESERVE UNTOUCHED SECTIONS: If the user is performing a targeted edit (e.g., updating skills, education, certifications, or editing a specific single project), you MUST preserve all existing roles and projects exactly as they are without deleting, merging, or truncating them to meet the 2-3 limit, while still ensuring the newly edited content is highly concise.
+3. Every bullet point MUST be highly concise (maximum 120 characters per bullet) and fit on a single line when rendered. Avoid long, wordy descriptions or paragraph narrative.
+4. Focus heavily on What was done, What specific libraries/tools/frameworks were used, and What the measurable outcome/result was.
+5. Do not duplicate information between sections.
+
+=== SOPHISTICATED TECHNICAL LINGO & ARCHITECTURAL DEPTH (FACTUAL & VERIFIED ONLY) ===
+Do NOT write simple or basic sentences (e.g., "Built a backend using Node" or "Made a website with React").
+Instead, uplift the lingo to read like a Senior/Principal Engineer, BUT you MUST strictly tie this advanced lingo *only* to the actual verified technologies, languages, and dependencies present in the project's repository data, README files, or LinkedIn history. 
+
+**STRICT ACCURACY RULES (CRITICAL):**
+1. DO NOT assume or invent architectures, frameworks, or database patterns that were never used. If a repository has no Go code, do NOT mention Goroutines. If a repository has no Redis dependency, do NOT claim you built a Redis caching layer.
+2. Read the 'dependencies', 'techStack', 'projectType', and 'complexity' fields of the repository carefully. Match your architectural descriptions character-for-character to these actual files.
+3. If React/Next.js/Vue is used, you may talk about: "optimizing DOM reconciliation cycles", "virtualized list rendering", "reactive state machines", or "component life-cycle/re-render optimizations".
+4. If Node.js is used, you may talk about: "non-blocking asynchronous event loop mechanics", "optimizing event emitters", or "handling async file streams".
+5. If Go is used, you may talk about: "goroutine pooling", "channel-based message structures", or "concurrency flow multiplexing".
+6. If Python or Machine Learning is used, you may talk about: "fine-tuning model weights scaling", "optimizing tensor shapes", "vector similarity queries", or "asynchronous data pipelines".
+7. Any claim of a performance metric (e.g., "reduced latency by 40%", "achieved sub-50ms responses") MUST be reasonable, logical, and directly tied to the technologies used (e.g., only mention caching speedups if the project actually used a cache like Redis, Memcached, or browser localStorage).
+
+Uplift basic phrasing into powerful, high-altitude software engineering lingo, but stay 100% truthful, factual, and anchored in the real code files and dependencies.
+
 === CRITICAL RULES ===
 
-1. PRESERVATION IS PARAMOUNT:
-   - ONLY modify what the user EXPLICITLY asks to change
-   - DO NOT remove, rewrite, or "improve" sections NOT mentioned
-   - DO NOT condense content unless explicitly asked
-   - Copy unchanged sections EXACTLY (including all IDs)
+1. PRESERVATION & USER INTENT (CRITICAL):
+   - ONLY modify what the user EXPLICITLY asks to change (e.g. if adding a project or fixing a specific item).
+   - **PRESERVE ALL ITEM IDs**: You MUST copy the 'id' field character-for-character from the current resume JSON into the corresponding items in the new resume JSON. Do NOT generate new IDs or drop existing ones.
+   - Copy unchanged sections EXACTLY (including all IDs).
+   - **CRITICAL**: If the user explicitly asks to make descriptions "1 line", "1 bullet point", or "shorten/condense", ALWAYS prioritize this request and generate EXACTLY 1 highly concise bullet point per project/experience.
 
 2. ATS/LRBT OPTIMIZATION (Apply to ALL changes):
    - Use standard action verbs: Developed, Implemented, Designed, Led, Optimized, Built, Engineered, Architected
    - Include measurable results: percentages, numbers, scale, cost savings
-   - Use full technology names: "JavaScript" not "JS", "Amazon Web Services (AWS)"
+   - Use full technology names: "JavaScript (JS)", "Amazon Web Services (AWS)"
    - NO special characters, emojis, or fancy formatting
-   - Keep bullet points concise (1-2 lines)
+   - Keep bullet points extremely concise (max 120 characters)
 
 3. MANDATORY BULLET FRAMEWORKS (WHO/CAN/FOCUS/TRP):
    Every bullet MUST follow one of these LRBT-optimized frameworks:
@@ -606,8 +574,8 @@ USER INSTRUCTION:
    - "[Task] achieving [Result] with [Performance metric]"
 
 4. WHEN ADDING CONTENT:
-   - Projects: Find in REPOSITORIES, create 2-3 impactful bullets using WHO/CAN/TRP frameworks
-   - Experience: Use frameworks above with specific technologies and metrics
+   - Projects: Find in REPOSITORIES or LinkedIn context. Create 1 to 2 concise bullets using WHO/CAN/TRP frameworks (max 120 characters each). Default to 2, but use exactly 1 if requested by the user.
+   - Experience: Extract from LinkedIn context. Create 1 to 2 bullets using frameworks above (max 120 characters each). Default to 2, but use exactly 1 if requested by the user.
    - Skills: Add to appropriate category (languages/frameworks/tools)
    - **CRITICAL**: If adding a project, ensure it's NOT already mentioned in Experience section (no work projects in Projects section)
 
@@ -615,12 +583,12 @@ USER INSTRUCTION:
    - Start with strong ACTION VERB
    - Include SPECIFIC technologies (not generic terms)
    - End with QUANTIFIABLE outcome (%, numbers, time, scale, cost)
-   - Example: "Architected event-driven microservices using Kafka and Go, processing 1M+ events/day with 99.99% reliability"
+   - Example: "Built scalable API using Express.js and PostgreSQL, reducing latency by 40%"
 
 6. COMMON REQUESTS:
    - "Make it more impactful" → Add metrics and stronger verbs, apply WHO/CAN frameworks
-   - "Add project X" → Create entry with tech stack and 2-3 framework-compliant bullets
-   - "Condense" → Keep most impactful points using TRP format for brevity
+   - "Add project X" → Create entry with tech stack and 1-2 framework-compliant bullets (max 120 chars each)
+   - "Condense / 1 line / 1 bullet" → Keep only exactly 1 concise, high-impact bullet point per item using TRP format for brevity
    - "More technical" → Add specific technologies, architectures, methodologies
    - "Target [role]" → Emphasize relevant skills using industry keywords
 
@@ -686,9 +654,20 @@ Return complete resume JSON with ONLY the requested changes.
       }
     }
 
+    // Recover ID from currentResume if omitted by AI
+    let matchedId = p.id;
+    if (!matchedId && currentResume.projects) {
+      const existingMatch = currentResume.projects.find(pr =>
+        pr.name?.toLowerCase() === p.name?.toLowerCase()
+      );
+      if (existingMatch) {
+        matchedId = existingMatch.id;
+      }
+    }
+
     return {
       ...p,
-      id: p.id || generateId(),
+      id: matchedId || generateId(),
       url: realRepo ? realRepo.html_url : (p.url || ''),
       homepage: realRepo?.homepage || p.homepage || '',
       isPrivate: realRepo?.private || false,
@@ -698,22 +677,84 @@ Return complete resume JSON with ONLY the requested changes.
     };
   });
 
-  // Ensure experience and education items have IDs
-  newData.experience = newData.experience.map(e => ({
-    ...e,
-    id: e.id || generateId(),
-    description: e.description || []
-  }));
+  // Ensure experience items have IDs with smart recovery fallback using composite matches
+  const consumedExperienceIds = new Set<string>();
+  newData.experience.forEach(e => {
+    if (e.id) consumedExperienceIds.add(e.id);
+  });
 
-  newData.education = newData.education.map(e => ({
-    ...e,
-    id: e.id || generateId()
-  }));
+  newData.experience = newData.experience.map(e => {
+    let matchedId = e.id;
+    if (!matchedId && currentResume.experience) {
+      // Look for a unique composite match of both company AND title
+      const existingMatch = currentResume.experience.find(ex =>
+        !consumedExperienceIds.has(ex.id) &&
+        ex.company?.toLowerCase() === e.company?.toLowerCase() &&
+        ex.title?.toLowerCase() === e.title?.toLowerCase()
+      );
+      if (existingMatch) {
+        matchedId = existingMatch.id;
+        consumedExperienceIds.add(existingMatch.id);
+      }
+    }
+    return {
+      ...e,
+      id: matchedId || generateId(),
+      description: e.description || []
+    };
+  });
 
-  newData.certifications = (newData.certifications || []).map(c => ({
-    ...c,
-    id: c.id || generateId()
-  }));
+  // Ensure education items have IDs with smart recovery fallback using composite matches
+  const consumedEducationIds = new Set<string>();
+  newData.education.forEach(e => {
+    if (e.id) consumedEducationIds.add(e.id);
+  });
+
+  newData.education = newData.education.map(e => {
+    let matchedId = e.id;
+    if (!matchedId && currentResume.education) {
+      // Look for a unique composite match of both institution AND degree
+      const existingMatch = currentResume.education.find(ed =>
+        !consumedEducationIds.has(ed.id) &&
+        ed.institution?.toLowerCase() === e.institution?.toLowerCase() &&
+        ed.degree?.toLowerCase() === e.degree?.toLowerCase()
+      );
+      if (existingMatch) {
+        matchedId = existingMatch.id;
+        consumedEducationIds.add(existingMatch.id);
+      }
+    }
+    return {
+      ...e,
+      id: matchedId || generateId()
+    };
+  });
+
+  // Ensure certification items have IDs with smart recovery fallback using composite matches
+  const consumedCertificationIds = new Set<string>();
+  (newData.certifications || []).forEach(c => {
+    if (c.id) consumedCertificationIds.add(c.id);
+  });
+
+  newData.certifications = (newData.certifications || []).map(c => {
+    let matchedId = c.id;
+    if (!matchedId && currentResume.certifications) {
+      // Look for a unique composite match of both name AND issuer
+      const existingMatch = currentResume.certifications.find(ce =>
+        !consumedCertificationIds.has(ce.id) &&
+        ce.name?.toLowerCase() === c.name?.toLowerCase() &&
+        ce.issuer?.toLowerCase() === c.issuer?.toLowerCase()
+      );
+      if (existingMatch) {
+        matchedId = existingMatch.id;
+        consumedCertificationIds.add(existingMatch.id);
+      }
+    }
+    return {
+      ...c,
+      id: matchedId || generateId()
+    };
+  });
 
   return newData;
 };
