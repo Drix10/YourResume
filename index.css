@@ -14,6 +14,161 @@
   --border-subtle: #3e4559; /* Subtle border color */
 }
 
+/* Screen: Resume page styling */
+.resume-page {
+  width: 210mm;
+  min-height: 297mm;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  padding: 0.5in;
+  margin: 0 auto;
+}
+
+/* ============================================
+   PRINT STYLES - Critical for PDF export
+   ============================================ */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm 15mm 12mm 15mm;
+  }
+
+  html, body {
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    font-size: 10pt !important;
+    line-height: 1.3 !important;
+  }
+
+  /* Hide screen-only elements */
+  .no-print,
+  .min-h-screen,
+  [class*="sticky"],
+  [class*="fixed"] {
+    display: none !important;
+  }
+
+  /* Resume container */
+  .resume-page {
+    width: 100% !important;
+    max-width: none !important;
+    min-height: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: white !important;
+    page-break-after: auto;
+    page-break-inside: avoid;
+  }
+
+  /* Force web-safe fonts for print reliability */
+  .resume-page,
+  .resume-page * {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  }
+
+  .resume-page h1,
+  .resume-page h2,
+  .resume-page h3,
+  .resume-page h4,
+  .resume-page .font-serif {
+    font-family: Georgia, "Times New Roman", Times, serif !important;
+    font-weight: 700 !important;
+  }
+
+  /* Prevent orphaned content */
+  .resume-page p,
+  .resume-page li,
+  .resume-page td,
+  .resume-page th {
+    orphans: 2 !important;
+    widows: 2 !important;
+  }
+
+  /* Keep sections together */
+  .resume-page section {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    margin-bottom: 6pt !important;
+  }
+
+  /* Section headers stay with content */
+  .resume-page h2,
+  .resume-page h3 {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+    margin-bottom: 3pt !important;
+  }
+
+  /* Header stays on first page */
+  .resume-page header {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+    margin-bottom: 8pt !important;
+  }
+
+  /* Links display */
+  .resume-page a {
+    text-decoration: none !important;
+    color: inherit !important;
+  }
+
+  /* Images */
+  .resume-page img {
+    max-width: 100% !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Compact mode for dense resumes */
+  .resume-compact .resume-page,
+  .resume-ultra-compact .resume-page {
+    font-size: 9pt !important;
+    line-height: 1.2 !important;
+  }
+
+  .resume-compact .resume-page h1,
+  .resume-ultra-compact .resume-page h1 {
+    font-size: 18pt !important;
+  }
+
+  .resume-compact .resume-page h2,
+  .resume-ultra-compact .resume-page h2 {
+    font-size: 9pt !important;
+  }
+
+  /* Page break handling */
+  .page-break {
+    page-break-after: always !important;
+    break-after: always !important;
+  }
+
+  .no-page-break {
+    page-break-before: avoid !important;
+    break-before: avoid !important;
+  }
+}
+
+/* ============================================
+   SCREEN STYLES
+   ============================================ */
+@media screen {
+  .resume-page {
+    width: 210mm;
+    min-height: 297mm;
+    background: white;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    margin: 20px auto;
+    padding: 0.5in;
+    border-radius: 2px;
+  }
+}
+
 body {
   background-color: var(--kachi-iro);
   color: var(--gofun-iro);
