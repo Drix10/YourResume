@@ -46,6 +46,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({
   const apiKeyModalRef = React.useRef<HTMLDivElement | null>(null);
   const successTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const pendingRetryRef = React.useRef<boolean>(false);
+  const isMountedRef = React.useRef<boolean>(true);
 
   useEffect(() => {
     setResume(data);
@@ -53,7 +54,9 @@ const ResumeView: React.FC<ResumeViewProps> = ({
 
   // Cleanup timeout on unmount - FIXED: Don't call setState in cleanup
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       if (printTimeoutRef.current) {
         clearTimeout(printTimeoutRef.current);
         printTimeoutRef.current = null;
@@ -575,6 +578,8 @@ const ResumeView: React.FC<ResumeViewProps> = ({
         context,
       );
 
+      if (!isMountedRef.current) return;
+
       // Check if component is still mounted before updating state
       setResume(updatedResume);
       setAiPrompt("");
@@ -587,10 +592,13 @@ const ResumeView: React.FC<ResumeViewProps> = ({
         clearTimeout(successTimeoutRef.current);
       }
       successTimeoutRef.current = setTimeout(() => {
-        setAiSuccess(false);
+        if (isMountedRef.current) {
+          setAiSuccess(false);
+        }
         successTimeoutRef.current = null;
       }, 3000);
     } catch (error: any) {
+      if (!isMountedRef.current) return;
       console.error("AI Update failed", error);
       let errorMsg = "Failed to update resume. Please try again.";
 
@@ -617,7 +625,9 @@ const ResumeView: React.FC<ResumeViewProps> = ({
 
       setAiError(errorMsg);
     } finally {
-      setIsAiProcessing(false);
+      if (isMountedRef.current) {
+        setIsAiProcessing(false);
+      }
     }
   };
 

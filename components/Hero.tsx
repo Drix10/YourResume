@@ -174,7 +174,6 @@ const Hero: React.FC<HeroProps> = ({
     }
 
     setIsProcessingPdf(true);
-    setImportError("");
 
     // Create abort controller for this request
     const abortController = new AbortController();
@@ -184,6 +183,10 @@ const Hero: React.FC<HeroProps> = ({
     const timeoutId = setTimeout(() => {
       if (abortController && !abortController.signal.aborted) {
         abortController.abort();
+        if (fileReaderRef.current && fileReaderRef.current.readyState === 1) {
+          fileReaderRef.current.abort();
+          fileReaderRef.current = null;
+        }
         setImportError(
           "PDF processing timed out. Please try again or use JSON export.",
         );
@@ -193,29 +196,43 @@ const Hero: React.FC<HeroProps> = ({
     }, 90000);
 
     try {
-      // Convert PDF file to base64
-      const arrayBuffer = await file.arrayBuffer();
-      const base64Data = btoa(
-        new Uint8Array(arrayBuffer).reduce(
-          (data, byte) => data + String.fromCharCode(byte),
-          "",
-        ),
-      );
+      // Efficiently convert PDF file to base64 using FileReader DataURL with cancellation support
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        fileReaderRef.current = reader;
+        reader.onload = () => {
+          fileReaderRef.current = null;
+          const result = reader.result as string;
+          const base64 = result.includes(",") ? result.split(",")[1] : result;
+          resolve(base64);
+        };
+        reader.onerror = (err) => {
+          fileReaderRef.current = null;
+          reject(err);
+        };
+        reader.onabort = () => {
+          fileReaderRef.current = null;
+          reject(new Error("PDF reading aborted"));
+        };
+        reader.readAsDataURL(file);
+      });
+
+      if (abortController.signal.aborted) return;
 
       // Use Gemini AI to parse the PDF directly
       const { GoogleGenAI } = await import("@google/genai");
       const genAI = new GoogleGenAI({ apiKey: geminiApiKey.trim() });
 
       const prompt = `
-Extract all information from this resume PDF and return structured JSON data.
+Extract all information from this resume PDF and transform it into ATS-optimized structured JSON data.
 
 Return ONLY valid JSON matching this structure:
 {
   "fullName": "string",
-  "title": "string (professional title)",
+  "title": "string (standardized professional title, e.g. Senior Full Stack Engineer)",
   "email": "string",
   "phone": "string",
-  "location": "string (City, Country)",
+  "location": "string (City, State/Country)",
   "linkedinUrl": "string",
   "githubUrl": "string",
   "website": "string",
@@ -224,21 +241,21 @@ Return ONLY valid JSON matching this structure:
       "institution": "string",
       "degree": "string",
       "location": "string",
-      "period": "string"
+      "period": "string (e.g. Sep 2018 - May 2022)"
     }
   ],
   "experience": [
     {
       "company": "string",
       "title": "string",
-      "period": "string",
-      "description": ["array of bullet point strings"]
+      "period": "string (e.g. Jan 2020 - Present)",
+      "description": ["array of ATS bullet point strings"]
     }
   ],
   "projects": [
     {
       "name": "string",
-      "description": ["array of bullet point strings"],
+      "description": ["array of ATS bullet point strings"],
       "technologies": ["array of technology strings"],
       "url": "string",
       "stars": 0
@@ -251,13 +268,15 @@ Return ONLY valid JSON matching this structure:
   }
 }
 
-CRITICAL RULES:
-1. Extract ALL information accurately from the PDF
-2. Preserve ALL bullet points exactly as written
-3. If a field is not found, use empty string "" or empty array []
-4. Ensure all URLs include https:// protocol
-5. Parse dates carefully (e.g., "Jan 2020 - Present", "2018 - 2022")
-6. Extract ALL technical skills mentioned
+STRICT ATS OPTIMIZATION RULES:
+1. Extract ALL information accurately from the PDF into standardized ATS section headers.
+2. PRESERVE UNICODE ACCURACY: Preserve Unicode in candidate identity data, full names, institution names, locations, and native-language skills (e.g. Accents, CJK, Cyrillic, Umlauts like 'José', 'München', 'Tsinghua'). Do NOT perform automatic ASCII-only transliteration. Sanitize control characters, unsafe markup, and unsupported visual symbols (🚀, 💻, ✨, •, ★) instead, while keeping fullName and title intact for required-field validation.
+3. ATS ACTION VERBS: Upgrade every bullet point to start with a strong, high-impact past-tense ATS Action Verb (Architected, Engineered, Implemented, Developed, Deployed, Spearheaded, Scaled, Automated, Optimized, Reduced). Replace passive phrasing ("worked on", "helped with", "responsible for").
+4. FULL TECH NAMES & ACRONYMS: Spell out full technology names first, optionally followed by acronyms: "Amazon Web Services (AWS)", "React.js", "Node.js", "TypeScript".
+5. STANDARD ATS DATES: Format dates into standard formats like "Jan 2020 - Present", "Aug 2018 - May 2022", or "2020 - 2022".
+6. CATEGORIZE SKILLS: Group technical skills cleanly into languages, frameworks, and tools.
+7. Ensure all URLs include https:// protocol.
+8. If a field is not found, use empty string "" or empty array [].
 `;
 
       const response = await genAI.models.generateContent({
@@ -277,6 +296,7 @@ CRITICAL RULES:
         ],
         config: {
           temperature: 0.1,
+          abortSignal: abortController.signal,
         },
       });
 
@@ -284,8 +304,6 @@ CRITICAL RULES:
       if (abortController.signal.aborted) {
         return;
       }
-
-      clearTimeout(timeoutId);
 
       const responseText = response.text;
 
@@ -332,14 +350,66 @@ CRITICAL RULES:
         return;
       }
 
+      // Sanitize control characters, unsafe markup, and unsupported visual symbols while preserving Unicode
+      const sanitizeExtractedPdfData = (data: any): any => {
+        if (!data || typeof data !== "object") return data;
+        const cleanString = (str: unknown): string => {
+          if (typeof str !== "string") return "";
+          return str
+            .replace(/<[^>]*>/g, "") // Remove unsafe HTML markup
+            .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "") // Control chars
+            .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{2300}-\u{23FF}\u{2B50}\u{2022}\u{2023}\u{25E6}\u{2043}\u{2219}]/gu, "") // Emojis & symbols
+            .replace(/^(?:[\-\*\•\>\#\–\—]+|\d+[\.\)])\s*/, "") // Leading bullet markers
+            .trim();
+        };
+        const cleanArray = (arr: unknown): string[] => {
+          if (!Array.isArray(arr)) return [];
+          return arr.map(cleanString).filter(Boolean);
+        };
+        return {
+          ...data,
+          fullName: cleanString(data.fullName),
+          title: cleanString(data.title),
+          email: cleanString(data.email),
+          phone: cleanString(data.phone),
+          location: cleanString(data.location),
+          linkedinUrl: typeof data.linkedinUrl === "string" ? data.linkedinUrl.trim() : "",
+          githubUrl: typeof data.githubUrl === "string" ? data.githubUrl.trim() : "",
+          website: typeof data.website === "string" ? data.website.trim() : "",
+          skills: {
+            languages: cleanArray(data.skills?.languages),
+            frameworks: cleanArray(data.skills?.frameworks),
+            tools: cleanArray(data.skills?.tools),
+          },
+          education: (Array.isArray(data.education) ? data.education : []).map((e: any) => ({
+            ...e,
+            institution: cleanString(e?.institution),
+            degree: cleanString(e?.degree),
+            location: cleanString(e?.location),
+            period: cleanString(e?.period)
+          })),
+          experience: (Array.isArray(data.experience) ? data.experience : []).map((exp: any) => ({
+            ...exp,
+            title: cleanString(exp?.title),
+            company: cleanString(exp?.company),
+            period: cleanString(exp?.period),
+            description: cleanArray(exp?.description)
+          })),
+          projects: (Array.isArray(data.projects) ? data.projects : []).map((p: any) => ({
+            ...p,
+            name: cleanString(p?.name),
+            technologies: cleanArray(p?.technologies),
+            description: cleanArray(p?.description)
+          }))
+        };
+      };
+
       // Success!
       setImportError("");
       setIsProcessingPdf(false);
       pdfAbortControllerRef.current = null;
-      onImportResume(resumeData);
+      onImportResume(sanitizeExtractedPdfData(resumeData));
     } catch (error: any) {
-      clearTimeout(timeoutId);
-
       // Check if aborted - don't update state if so
       if (abortController.signal.aborted) {
         return;
@@ -393,6 +463,8 @@ CRITICAL RULES:
       setImportError(errorMsg);
       setIsProcessingPdf(false);
       pdfAbortControllerRef.current = null;
+    } finally {
+      clearTimeout(timeoutId);
     }
   };
 
