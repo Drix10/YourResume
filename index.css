@@ -44,11 +44,10 @@
     line-height: 1.3 !important;
   }
 
-  /* Hide screen-only elements */
-  .no-print,
-  .min-h-screen,
-  [class*="sticky"],
-  [class*="fixed"] {
+  /* Hide only elements explicitly marked as screen-only. The resume itself is
+     inside a min-h-screen layout wrapper, so hiding that utility class removes
+     the entire document from Chrome's print tree and produces a blank PDF. */
+  .no-print {
     display: none !important;
   }
 
@@ -64,7 +63,10 @@
     border: none !important;
     background: white !important;
     page-break-after: auto;
-    page-break-inside: avoid;
+    /* The full resume can exceed one sheet. Allow it to flow onto another page
+       instead of letting the browser discard an oversized unbreakable box. */
+    page-break-inside: auto !important;
+    break-inside: auto !important;
   }
 
   /* Force web-safe fonts for print reliability */
