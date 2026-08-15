@@ -313,7 +313,7 @@ Output strictly valid JSON matching the schema.
   let response;
   try {
     response = await genAI.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.5-flash',
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -606,7 +606,7 @@ Return complete resume JSON with ONLY the requested changes.
   let response;
   try {
     response = await genAI.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.5-flash',
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
