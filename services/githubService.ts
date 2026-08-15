@@ -1,4 +1,4 @@
-import { GitHubRepo, GitHubUser, EnrichedRepoData } from '../types';
+import { GitHubRepo, GitHubUser, EnrichedRepoData, ProjectCandidate } from '../types';
 import { GITHUB_API } from '../constants';
 
 const BASE_URL = GITHUB_API.BASE_URL;
@@ -1172,6 +1172,72 @@ export const fetchAllRepos = async (token: string, username: string): Promise<Gi
 };
 
 // Smart repo scoring that works for both public and private repos
+// Repository names frequently describe deployable components rather than
+// independent portfolio work. These suffixes let the scoring pipeline retain
+// that relationship before the LLM sees the data.
+const PROJECT_COMPONENT_TOKENS = new Set([
+  'api', 'app', 'backend', 'bot', 'client', 'core', 'dashboard', 'db',
+  'docs', 'frontend', 'mobile', 'package', 'packages', 'server', 'service',
+  'shared', 'ui', 'web', 'website', 'worker',
+]);
+
+const repoNameTokens = (name: string): string[] =>
+  name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+export const getProjectFamily = (name: string): string => {
+  const tokens = repoNameTokens(name);
+  let end = tokens.length;
+  while (end > 1 && PROJECT_COMPONENT_TOKENS.has(tokens[end - 1])) end--;
+  return tokens.slice(0, end).join(' ');
+};
+
+const getComponentRole = (name: string): string => {
+  const roles = repoNameTokens(name).filter(token => PROJECT_COMPONENT_TOKENS.has(token));
+  return roles.length ? roles.join(' + ') : 'application';
+};
+
+// Group only same-stem repositories. We do not guess relationships from broad
+// technology overlap, which would incorrectly merge unrelated React/Node apps.
+export const groupReposIntoProjects = (repos: EnrichedRepoData[]): ProjectCandidate[] => {
+  const families = new Map<string, EnrichedRepoData[]>();
+  for (const repo of repos.filter(repo => !repo.fork && !repo.archived)) {
+    const family = getProjectFamily(repo.name);
+    families.set(family, [...(families.get(family) || []), repo]);
+  }
+
+  return [...families.entries()]
+    .map(([family, members]) => {
+      const roles = new Set(members.map(repo => getComponentRole(repo.name)));
+      const repoScore = members.reduce(
+        (total, repo) => total + Math.max(0, repo.calculatedScore || 0),
+        0,
+      );
+      // A verified multi-component product deserves a small, bounded bonus;
+      // the constituent evidence remains the primary ranking signal.
+      const productBonus = members.length > 1 ? 20 + Math.min(roles.size * 5, 15) : 0;
+
+      return {
+        name: family.replace(/\b\w/g, char => char.toUpperCase()),
+        family,
+        score: repoScore + productBonus,
+        repositories: members.map(repo => ({
+          name: repo.name,
+          role: getComponentRole(repo.name),
+          url: repo.html_url,
+        })),
+        description: members.map(repo => repo.description).filter(Boolean).join(' '),
+        technologies: [...new Set(members.flatMap(repo => repo.enrichedData?.detectedTechnologies || []))]
+          .slice(0, 12),
+        hasTests: members.some(repo => repo.enrichedData?.packageJson?.scripts?.some(script => script.includes('test'))),
+        hasBuild: members.some(repo => repo.enrichedData?.packageJson?.scripts?.some(script => script.includes('build'))),
+        hasDemo: members.some(repo => repo.enrichedData?.readme?.hasDemo || Boolean(repo.homepage)),
+        commits: members.reduce((total, repo) => total + (repo.enrichedData?.commitCount || 0), 0),
+      };
+    })
+    .sort((a, b) => b.score - a.score || b.commits - a.commits)
+    .slice(0, 8);
+};
+
 export const scoreAndSortRepos = (repos: EnrichedRepoData[], username: string): EnrichedRepoData[] => {
   const usernameLower = username.toLowerCase();
 

@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
-import { GitHubRepo, GitHubUser, ResumeData, EnrichedRepoData } from '../types';
+import { GitHubRepo, GitHubUser, ResumeData, EnrichedRepoData, ProjectCandidate } from '../types';
 import { GITHUB_API } from '../constants';
+import { getProjectFamily, groupReposIntoProjects } from './githubService';
 
 // Generate UUID with fallback for older browsers
 const generateId = (): string => {
@@ -173,41 +174,61 @@ const formatReposForContext = (repos: GitHubRepo[], limit: number = 50) => {
     });
 };
 
-// A product is often split into frontend/backend repositories. Select the
-// product rather than letting the model spend two project slots on its parts.
-const projectFamily = (name: string): string =>
-  name
-    .toLowerCase()
-    .replace(/[-_](frontend|backend|client|server|api|web|app)$/i, '')
-    .replace(/[-_]/g, ' ')
-    .trim();
+const normalizedProjectName = (name: string): string =>
+  getProjectFamily(name).replace(/[^a-z0-9]/g, '');
 
-const buildProjectCandidates = (repos: EnrichedRepoData[]) => {
-  const families = new Map<string, EnrichedRepoData[]>();
-  for (const repo of repos.filter(repo => !repo.fork && !repo.archived)) {
-    const key = projectFamily(repo.name);
-    families.set(key, [...(families.get(key) || []), repo]);
+// The model formats names for humans ("Intent Canvas"), whereas GitHub names
+// them for URLs ("intent-canvas-backend"). Resolve both forms consistently.
+const findVerifiedRepo = (projectName: unknown, repos: GitHubRepo[]): GitHubRepo | undefined => {
+  if (typeof projectName !== 'string' || !projectName.trim()) return undefined;
+  const normalizedName = normalizedProjectName(projectName);
+  const matches = repos.filter(repo =>
+    normalizedProjectName(repo.name) === normalizedName ||
+    repo.name.toLowerCase() === projectName.toLowerCase().trim(),
+  );
+
+  return matches.sort((a, b) =>
+    Number(Boolean(b.homepage)) - Number(Boolean(a.homepage)) ||
+    b.stargazers_count - a.stargazers_count,
+  )[0];
+};
+
+const addVerifiedProjectFallbacks = (
+  projects: any[],
+  repos: GitHubRepo[],
+  candidates: ProjectCandidate[],
+) => {
+  const usedFamilies = new Set(
+    projects.map(project => {
+      const repo = findVerifiedRepo(project.name, repos);
+      return repo ? getProjectFamily(repo.name) : getProjectFamily(project.name || '');
+    }),
+  );
+
+  for (const candidate of candidates) {
+    if (projects.length >= 3 || usedFamilies.has(getProjectFamily(candidate.name))) continue;
+    const repo = findVerifiedRepo(candidate.name, repos);
+    if (!repo) continue;
+
+    const source = candidate.description.replace(/\s+/g, ' ').trim();
+    const conciseDescription = source
+      ? `Developed ${source.charAt(0).toLowerCase()}${source.slice(1)}`.slice(0, 120)
+      : `Developed ${candidate.name} using ${candidate.technologies.slice(0, 3).join(', ')}.`.slice(0, 120);
+
+    projects.push({
+      id: generateId(),
+      name: candidate.name,
+      description: [conciseDescription],
+      technologies: candidate.technologies,
+      url: repo.html_url,
+      homepage: repo.homepage || '',
+      isPrivate: repo.private,
+      stars: repo.stargazers_count,
+    });
+    usedFamilies.add(getProjectFamily(candidate.name));
   }
 
-  return [...families.entries()]
-    .map(([family, members]) => {
-      const score = members.reduce((total, repo) => total + Math.max(0, repo.calculatedScore || 0), 0);
-      const technologies = [...new Set(members.flatMap(repo => repo.enrichedData?.detectedTechnologies || []))]
-        .slice(0, 12);
-      return {
-        name: family.replace(/\b\w/g, char => char.toUpperCase()),
-        score,
-        repositories: members.map(repo => repo.name),
-        description: members.map(repo => repo.description).filter(Boolean).join(' '),
-        technologies,
-        hasTests: members.some(repo => repo.enrichedData?.packageJson?.scripts?.some(script => script.includes('test'))),
-        hasBuild: members.some(repo => repo.enrichedData?.packageJson?.scripts?.some(script => script.includes('build'))),
-        hasDemo: members.some(repo => repo.enrichedData?.readme?.hasDemo || Boolean(repo.homepage)),
-        commits: members.reduce((total, repo) => total + (repo.enrichedData?.commitCount || 0), 0),
-      };
-    })
-    .sort((a, b) => b.score - a.score || b.commits - a.commits)
-    .slice(0, 8);
+  return projects;
 };
 
 export const generateResumeFromGithub = async (
@@ -229,7 +250,9 @@ export const generateResumeFromGithub = async (
 
   const genAI = new GoogleGenAI({ apiKey: trimmedApiKey });
   const relevantRepos = formatReposForContext(repos, GITHUB_API.TOP_REPOS_FOR_INITIAL);
-  const projectCandidates = buildProjectCandidates(enrichedRepos);
+  const projectCandidates = groupReposIntoProjects(
+    enrichedRepos.length > 0 ? enrichedRepos : repos,
+  );
 
   // Format enriched repo data for AI (already sorted by smart scoring)
   const enrichedRepoContext = enrichedRepos.map(r => ({
@@ -344,7 +367,7 @@ Use clear, concrete language matched to the candidate's demonstrated scope. Do n
 4. EXPERIENCE: Extract only from LinkedIn/additional context. If none is supplied, return an empty array. Use 1 to 2 factual bullets per role (max 120 characters each).
 5. PROJECTS: Select 1 to 3 verified projects. Require 2 or 3 projects ONLY when supported by verified repository data; prohibit inventing unsupported projects.
 6. TECHNICAL SKILLS: Categorize into Languages, Frameworks, and Tools. Format as clean array lists.
-7. PROJECT PRIORITY: Select projects from PREFERRED PROJECT CANDIDATES, in rank order. A candidate with multiple repositories is one full-stack product and must use one project slot, not separate frontend and backend entries. Do not choose a lower-ranked project solely because it has more stars.
+7. PROJECT PRIORITY: Select projects from PREFERRED PROJECT CANDIDATES, in rank order. The repositories field lists component roles (for example web, API, worker, mobile, or shared package). A candidate with multiple repositories is one product: use one project slot, combine the verified stack across its components, and never list its component repositories separately. Do not choose a lower-ranked project solely because it has more stars.
 
 Output strictly valid JSON matching the schema.
   `;
@@ -411,25 +434,7 @@ Output strictly valid JSON matching the schema.
   data.experience = data.experience.map(e => ({ ...e, id: e.id || generateId() }));
 
   data.projects = data.projects.map(p => {
-    // Try exact match first
-    let realRepo = repos.find(r => r.name.toLowerCase() === p.name.toLowerCase());
-
-    // If no exact match, try to find related repos (for merged projects like "idolchat" from "idolchat-app")
-    if (!realRepo) {
-      const projectNameLower = p.name.toLowerCase();
-      // Find repos that start with the project name (e.g., "idolchat-app" starts with "idolchat")
-      const relatedRepos = repos.filter(r =>
-        r.name.toLowerCase().startsWith(projectNameLower + '-') ||
-        r.name.toLowerCase() === projectNameLower
-      );
-
-      // Use the one with most stars, or first match
-      if (relatedRepos.length > 0) {
-        realRepo = relatedRepos.reduce((best, current) =>
-          (current.stargazers_count || 0) > (best.stargazers_count || 0) ? current : best
-        );
-      }
-    }
+    const realRepo = findVerifiedRepo(p.name, repos);
 
     return {
       ...p,
@@ -444,6 +449,7 @@ Output strictly valid JSON matching the schema.
       technologies: p.technologies || []
     };
   }).filter(project => project.url || project.homepage).slice(0, 3);
+  data.projects = addVerifiedProjectFallbacks(data.projects, repos, projectCandidates);
 
   return sanitizeAtsData(data);
 };
@@ -717,19 +723,7 @@ Return complete resume JSON with ONLY the requested changes.
   const consumedProjectIds = new Set<string>();
 
   newData.projects = newData.projects.map(p => {
-    let realRepo = context.repos.find(r => r.name.toLowerCase() === p.name.toLowerCase());
-    if (!realRepo) {
-      const projectNameLower = p.name.toLowerCase();
-      const relatedRepos = context.repos.filter(r =>
-        r.name.toLowerCase().startsWith(projectNameLower + '-') ||
-        r.name.toLowerCase() === projectNameLower
-      );
-      if (relatedRepos.length > 0) {
-        realRepo = relatedRepos.reduce((best, current) =>
-          (current.stargazers_count || 0) > (best.stargazers_count || 0) ? current : best
-        );
-      }
-    }
+    const realRepo = findVerifiedRepo(p.name, context.repos);
 
     let finalId = '';
     if (p.id && existingProjectIds.has(p.id) && !consumedProjectIds.has(p.id)) {
@@ -759,6 +753,13 @@ Return complete resume JSON with ONLY the requested changes.
       technologies: p.technologies || []
     };
   }).filter(project => project.url || project.homepage).slice(0, 3);
+  newData.projects = addVerifiedProjectFallbacks(
+    newData.projects,
+    context.repos,
+    groupReposIntoProjects(
+      context.enrichedRepos.length > 0 ? context.enrichedRepos : context.repos,
+    ),
+  );
 
   // Re-hydrate & reconcile Experience IDs with currentResume
   const existingExperienceIds = new Set((currentResume.experience || []).map(e => e.id));

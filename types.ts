@@ -55,6 +55,23 @@ export interface EnrichedRepoData extends GitHubRepo {
   };
 }
 
+export interface ProjectCandidate {
+  name: string;
+  family: string;
+  score: number;
+  repositories: Array<{
+    name: string;
+    role: string;
+    url: string;
+  }>;
+  description: string;
+  technologies: string[];
+  hasTests: boolean;
+  hasBuild: boolean;
+  hasDemo: boolean;
+  commits: number;
+}
+
 export interface GitHubUser {
   login: string;
   avatar_url: string;
