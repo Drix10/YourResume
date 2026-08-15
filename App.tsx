@@ -26,6 +26,7 @@ const App: React.FC = () => {
     enrichedRepos: EnrichedRepoData[];
     linkedinText: string;
     geminiApiKey: string;
+    projectLimit: number;
   } | null>(null);
 
   const [errorMessage, setErrorMessage] = useState<string>("");
@@ -38,6 +39,7 @@ const App: React.FC = () => {
     geminiApiKey: string,
     linkedinText: string,
     includePrivateRepoData: boolean,
+    projectLimit: number,
   ) => {
     // Prevent double-submission
     if (isGeneratingRef.current) {
@@ -89,6 +91,7 @@ const App: React.FC = () => {
         enrichedRepos: scoredRepos,
         linkedinText,
         geminiApiKey,
+        projectLimit,
       });
       setAppState(AppState.ANALYZING_AI);
 
@@ -99,6 +102,7 @@ const App: React.FC = () => {
         reposForAi,
         scoredRepos,
         linkedinText,
+        projectLimit,
       );
 
       setResumeData(generatedResume);
@@ -330,6 +334,7 @@ const App: React.FC = () => {
         enrichedRepos: [],
         linkedinText: "",
         geminiApiKey: "", // Empty for imported resumes - will prompt user when AI features are used
+        projectLimit: 3,
       };
 
       setResumeData(validatedData);

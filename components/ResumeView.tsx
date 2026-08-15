@@ -20,6 +20,7 @@ interface ResumeViewProps {
     enrichedRepos: EnrichedRepoData[];
     linkedinText: string;
     geminiApiKey: string;
+    projectLimit: number;
   };
   onReset: () => void;
   onUpdateApiKey?: (apiKey: string) => void;

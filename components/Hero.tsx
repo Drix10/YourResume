@@ -7,6 +7,7 @@ interface HeroProps {
     geminiApiKey: string,
     linkedinText: string,
     includePrivateRepoData: boolean,
+    projectLimit: number,
   ) => void;
   onImportResume: (resumeData: any) => void;
   state: AppState;
@@ -23,6 +24,7 @@ const Hero: React.FC<HeroProps> = ({
   const [geminiApiKey, setGeminiApiKey] = useState("");
   const [linkedinText, setLinkedinText] = useState("");
   const [includePrivateRepoData, setIncludePrivateRepoData] = useState(false);
+  const [projectLimit, setProjectLimit] = useState(3);
 
   const [formError, setFormError] = useState("");
   const [showGithubToken, setShowGithubToken] = useState(false);
@@ -566,6 +568,7 @@ STRICT ATS OPTIMIZATION RULES:
       trimmedGeminiKey,
       sanitizedLinkedin,
       includePrivateRepoData,
+      projectLimit,
     );
   };
 
@@ -785,6 +788,27 @@ STRICT ATS OPTIMIZATION RULES:
                   README and dependency details to Gemini.
                 </span>
               </label>
+
+              <div>
+                <label className="block text-xs font-bold text-[#F4F4F0] uppercase tracking-wider mb-2">
+                  Projects to Include
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={projectLimit}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    setProjectLimit(Number.isFinite(value) ? Math.min(Math.max(Math.floor(value), 1), 8) : 3);
+                  }}
+                  disabled={isLoading}
+                  className="w-full bg-[#181B26] text-[#F4F4F0] border border-[#3e4559] px-3 py-2 text-sm focus:outline-none focus:border-[#D4A15A]"
+                />
+                <p className="text-[10px] text-[#5c637a] mt-2">
+                  Default: 3. Choose up to 8 verified projects; more projects may require a second page.
+                </p>
+              </div>
 
               <button
                 type="submit"

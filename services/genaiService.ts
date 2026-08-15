@@ -63,7 +63,7 @@ const resumeSchema: Schema = {
     },
     projects: {
       type: Type.ARRAY,
-      description: "Exactly 3 most impressive, verified technical products when at least 3 exist; otherwise include every verified project available. Keep this section suitable for a single-page resume.",
+      description: "A user-configured number of impressive, verified technical products. Keep every project concise so the resume stays compact.",
       items: {
         type: Type.OBJECT,
         properties: {
@@ -215,6 +215,7 @@ const addVerifiedProjectFallbacks = (
   projects: any[],
   repos: GitHubRepo[],
   candidates: ProjectCandidate[],
+  projectLimit: number,
 ) => {
   const usedFamilies = new Set(
     projects.map(project => {
@@ -224,7 +225,7 @@ const addVerifiedProjectFallbacks = (
   );
 
   for (const candidate of candidates) {
-    if (projects.length >= 3 || usedFamilies.has(getProjectFamily(candidate.name))) continue;
+    if (projects.length >= projectLimit || usedFamilies.has(getProjectFamily(candidate.name))) continue;
     const repo = findVerifiedRepo(candidate.name, repos);
     if (!repo) continue;
 
@@ -254,13 +255,15 @@ export const generateResumeFromGithub = async (
   user: GitHubUser,
   repos: GitHubRepo[],
   enrichedRepos: EnrichedRepoData[],
-  linkedinText: string
+  linkedinText: string,
+  requestedProjectLimit = 3,
 ): Promise<ResumeData> => {
   if (!apiKey || apiKey.trim().length === 0) {
     throw new Error("Gemini API Key is required. Please enter your API key.");
   }
 
   const trimmedApiKey = apiKey.trim();
+  const projectLimit = Math.min(Math.max(Math.floor(requestedProjectLimit), 1), 8);
 
   if (!repos || repos.length === 0) {
     throw new Error("No repositories found. Please ensure your GitHub account has at least one repository.");
@@ -371,7 +374,7 @@ TASK: Generate an ATS-optimized, professional resume JSON.
 === STRICT ONE-PAGE CONSTRAINT & CONCISENESS ===
 To keep the resume concise (actual pagination depends on the user's printer, font, and paper size):
 1. Include only professional experience explicitly present in LinkedIn/additional context. Do not invent an "Open Source Contributor" role or any other fallback experience.
-2. Select exactly 3 verified projects when at least 3 candidates exist; otherwise include every verified candidate. Do NOT invent unsupported projects.
+2. Select up to ${projectLimit} verified projects, prioritizing the strongest evidence. Do NOT invent unsupported projects.
 3. Every project MUST have exactly 1 concise bullet (maximum 160 characters). Keep each experience role to 1-2 concise bullets. Avoid wordy descriptions, narrative paragraphs, or filler.
 4. Focus heavily on What was done, What technologies/libraries/tools were used, and What the measurable outcome/metric was.
 5. Do not duplicate information between sections.
@@ -389,7 +392,7 @@ Use clear, concrete language matched to the candidate's demonstrated scope. Do n
 2. EDUCATION: Extract ONLY from LinkedIn text or GitHub bio (DO NOT fabricate). Limit to top 1-2 entries.
 3. CERTIFICATIONS & LICENSES: Extract from LinkedIn text (DO NOT fabricate). Limit to top 2-3 items.
 4. EXPERIENCE: Extract only from LinkedIn/additional context. If none is supplied, return an empty array. Use 1 to 2 factual bullets per role (max 120 characters each).
-5. PROJECTS: Select exactly 3 verified projects when available; prohibit inventing unsupported projects.
+5. PROJECTS: Select up to ${projectLimit} verified projects; prohibit inventing unsupported projects.
 6. TECHNICAL SKILLS: Categorize into Languages, Frameworks, and Tools. Format as clean array lists.
 7. PROJECT PRIORITY: Select projects from PREFERRED PROJECT CANDIDATES, in rank order. The repositories field lists component roles (for example web, API, worker, mobile, or shared package). A candidate with multiple repositories is one product: use one project slot, combine the verified stack across its components, and never list its component repositories separately. Do not choose a lower-ranked project solely because it has more stars.
 
@@ -472,8 +475,8 @@ Output strictly valid JSON matching the schema.
       description: p.description || [],
       technologies: p.technologies || []
     };
-  }).filter(project => project.url || project.homepage).slice(0, 3);
-  data.projects = addVerifiedProjectFallbacks(data.projects, repos, projectCandidates);
+  }).filter(project => project.url || project.homepage).slice(0, projectLimit);
+  data.projects = addVerifiedProjectFallbacks(data.projects, repos, projectCandidates, projectLimit);
 
   return sanitizeAtsData(data);
 };
@@ -652,7 +655,7 @@ export const updateResumeWithAI = async (
   apiKey: string,
   currentResume: ResumeData,
   userPrompt: string,
-  context: { user: GitHubUser; repos: GitHubRepo[]; enrichedRepos: EnrichedRepoData[]; linkedinText: string },
+  context: { user: GitHubUser; repos: GitHubRepo[]; enrichedRepos: EnrichedRepoData[]; linkedinText: string; projectLimit: number },
   signal?: AbortSignal,
 ): Promise<ResumeData> => {
   if (!apiKey || apiKey.trim().length === 0) {
@@ -812,7 +815,7 @@ Return exactly one object in this shape: { "changes": { ... } }.
       description: p.description || [],
       technologies: p.technologies || []
     };
-    }).filter(project => project.url || project.homepage).slice(0, 3);
+    }).filter(project => project.url || project.homepage).slice(0, Math.min(Math.max(context.projectLimit || 3, 1), 8));
   }
 
   // Re-hydrate & reconcile Experience IDs with currentResume
