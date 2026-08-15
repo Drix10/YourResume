@@ -1319,13 +1319,15 @@ export const scoreAndSortRepos = (repos: EnrichedRepoData[], username: string): 
       if (data?.readme?.hasDemo === true) score += 20; // Live deployment
       if (data?.readme?.hasMetrics === true) score += 15; // Measurable impact
 
-      // === DEPENDENCY COUNT (indicates complexity) ===
+      // === TECHNOLOGY BREADTH ===
+      // A long dependency list is not proof of engineering depth: generated
+      // projects and boilerplates can have many packages. Give modest credit
+      // only for a genuinely varied, detected stack.
       const techs = Array.isArray(data?.detectedTechnologies) ? data.detectedTechnologies : [];
       const depCount = techs.length;
-      if (depCount > 30) score += 120;
-      else if (depCount > 20) score += 80;
-      else if (depCount > 10) score += 40;
-      else if (depCount > 5) score += 20;
+      if (depCount > 20) score += 25;
+      else if (depCount > 10) score += 15;
+      else if (depCount > 5) score += 8;
 
       // === RECENCY (Recent work is relevant) ===
       // Safe date parsing with validation
