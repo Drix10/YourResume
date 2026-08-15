@@ -11,6 +11,25 @@ const generateId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 };
 
+const AI_REFINEMENT_TIMEOUT_MS = 45_000;
+
+const withTimeout = async <T>(operation: Promise<T>, timeoutMs: number): Promise<T> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error('AI refinement timed out after 45 seconds. Please try again.')),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+};
+
 
 
 const resumeSchema: Schema = {
@@ -104,6 +123,20 @@ const resumeSchema: Schema = {
     }
   },
   required: ["fullName", "title", "skills", "projects", "experience"]
+};
+
+// Refinement is a patch operation, not a second resume-generation pass. The
+// nested `changes` object intentionally has no required fields: the model may
+// return only the field(s) the user asked to edit.
+const resumeUpdateSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    changes: {
+      type: Type.OBJECT,
+      properties: resumeSchema.properties,
+    },
+  },
+  required: ["changes"],
 };
 
 // Helper to sort and format repos for context
@@ -578,6 +611,52 @@ export const sanitizeAtsData = (data: ResumeData): ResumeData => {
   };
 };
 
+const mergeChangedItems = <T extends { id?: string }>(
+  current: T[],
+  changes: unknown,
+  matches: (currentItem: T, change: T) => boolean,
+): T[] => {
+  if (!Array.isArray(changes)) return current;
+
+  const result = [...current];
+  for (const change of changes as T[]) {
+    if (!change || typeof change !== 'object') continue;
+    const index = result.findIndex(item =>
+      (change.id && item.id === change.id) || matches(item, change),
+    );
+    if (index >= 0) {
+      // Preserve fields the model did not include, especially URLs and IDs.
+      result[index] = { ...result[index], ...change, id: result[index].id || change.id };
+    } else {
+      result.push({ ...change, id: change.id || generateId() });
+    }
+  }
+  return result;
+};
+
+const applyResumeChanges = (current: ResumeData, changes: Partial<ResumeData>): ResumeData => ({
+  ...current,
+  ...changes,
+  skills: changes.skills
+    ? { ...current.skills, ...changes.skills }
+    : current.skills,
+  education: mergeChangedItems(current.education || [], changes.education, (a, b) =>
+    a.institution?.toLowerCase() === b.institution?.toLowerCase() &&
+    a.degree?.toLowerCase() === b.degree?.toLowerCase(),
+  ),
+  certifications: mergeChangedItems(current.certifications || [], changes.certifications, (a, b) =>
+    a.name?.toLowerCase() === b.name?.toLowerCase() &&
+    a.issuer?.toLowerCase() === b.issuer?.toLowerCase(),
+  ),
+  experience: mergeChangedItems(current.experience || [], changes.experience, (a, b) =>
+    a.company?.toLowerCase() === b.company?.toLowerCase() &&
+    a.title?.toLowerCase() === b.title?.toLowerCase(),
+  ),
+  projects: mergeChangedItems(current.projects || [], changes.projects, (a, b) =>
+    a.name?.toLowerCase() === b.name?.toLowerCase(),
+  ),
+});
+
 export const updateResumeWithAI = async (
   apiKey: string,
   currentResume: ResumeData,
@@ -676,20 +755,25 @@ The entire resume MUST fit perfectly on EXACTLY one page (A4/Letter).
    - Experience: Extract from LinkedIn context. Create 1 to 2 bullets using frameworks above (max 120 characters each). Default to 2, but use exactly 1 if requested by user.
    - Skills: Add to appropriate category (languages/frameworks/tools)
 
-Return complete resume JSON with ONLY the requested changes.
+=== PATCH OUTPUT CONTRACT (MANDATORY) ===
+Return exactly one object in this shape: { "changes": { ... } }.
+- Include ONLY top-level fields the user explicitly asked to change. Omit every untouched field.
+- For education, certifications, experience, and projects, include ONLY changed or newly added items and preserve their existing id values. Do not return sibling items that are unchanged.
+- Never delete or rewrite an item unless the user explicitly names it and asks to remove or replace it.
+- For skills, include only the category being edited (languages, frameworks, or tools).
   `;
 
   let response;
   try {
-    response = await genAI.models.generateContent({
+    response = await withTimeout(genAI.models.generateContent({
       model: 'gemini-3.5-flash',
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
-        responseSchema: resumeSchema,
+        responseSchema: resumeUpdateSchema,
         temperature: 0.3,
       }
-    });
+    }), AI_REFINEMENT_TIMEOUT_MS);
   } catch (apiError: any) {
     console.error('AI API call failed:', apiError);
     if (apiError?.message?.includes('quota') || apiError?.message?.includes('rate limit')) {
@@ -699,30 +783,32 @@ Return complete resume JSON with ONLY the requested changes.
   }
 
   // Parse result with error handling
-  let newData: ResumeData;
+  let changes: Partial<ResumeData>;
   try {
     const responseText = response.text || '{}';
     if (!responseText || responseText.trim().length === 0) {
       throw new Error('AI returned empty response');
     }
-    newData = JSON.parse(responseText) as ResumeData;
+    const parsed = JSON.parse(responseText);
+    if (!parsed?.changes || typeof parsed.changes !== 'object' || Array.isArray(parsed.changes)) {
+      throw new Error('AI response did not contain a changes object');
+    }
+    changes = parsed.changes as Partial<ResumeData>;
   } catch (parseError: any) {
     console.error('Failed to parse AI response:', parseError);
     throw new Error(`AI generated invalid response: ${parseError?.message || 'Parse error'}. Please try again.`);
   }
 
-  // Ensure arrays exist to prevent crashes
-  newData.projects = newData.projects || [];
-  newData.experience = newData.experience || [];
-  newData.education = newData.education || [];
-  newData.certifications = newData.certifications || [];
-  newData.skills = newData.skills || { languages: [], frameworks: [], tools: [] };
+  const hasProjectChanges = Array.isArray(changes.projects);
+  let newData = applyResumeChanges(currentResume, changes);
 
-  // Re-hydrate & reconcile Projects IDs with currentResume
-  const existingProjectIds = new Set((currentResume.projects || []).map(p => p.id));
-  const consumedProjectIds = new Set<string>();
+  // Re-hydrate new project additions only. An edit to another section must not
+  // reorder, discard, or regenerate the existing project list.
+  if (hasProjectChanges) {
+    const existingProjectIds = new Set((currentResume.projects || []).map(p => p.id));
+    const consumedProjectIds = new Set<string>();
 
-  newData.projects = newData.projects.map(p => {
+    newData.projects = newData.projects.map(p => {
     const realRepo = findVerifiedRepo(p.name, context.repos);
 
     let finalId = '';
@@ -741,25 +827,21 @@ Return complete resume JSON with ONLY the requested changes.
     }
     consumedProjectIds.add(finalId);
 
+    const existingProject = (currentResume.projects || []).find(project => project.id === finalId);
     return {
       ...p,
       id: finalId,
-      // Do not retain an LLM-supplied URL for a project we cannot verify.
-      url: realRepo ? realRepo.html_url : '',
-      homepage: realRepo?.homepage || '',
-      isPrivate: realRepo?.private || false,
+      // Preserve an existing, user-authored project link if no GitHub match is
+      // available; new projects still require a verified repository.
+      url: realRepo ? realRepo.html_url : (existingProject?.url || ''),
+      homepage: realRepo?.homepage || existingProject?.homepage || '',
+      isPrivate: realRepo?.private ?? existingProject?.isPrivate ?? false,
       stars: realRepo ? realRepo.stargazers_count : (p.stars || 0),
       description: p.description || [],
       technologies: p.technologies || []
     };
-  }).filter(project => project.url || project.homepage).slice(0, 3);
-  newData.projects = addVerifiedProjectFallbacks(
-    newData.projects,
-    context.repos,
-    groupReposIntoProjects(
-      context.enrichedRepos.length > 0 ? context.enrichedRepos : context.repos,
-    ),
-  );
+    }).filter(project => project.url || project.homepage).slice(0, 3);
+  }
 
   // Re-hydrate & reconcile Experience IDs with currentResume
   const existingExperienceIds = new Set((currentResume.experience || []).map(e => e.id));
