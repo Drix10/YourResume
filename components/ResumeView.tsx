@@ -47,6 +47,8 @@ const ResumeView: React.FC<ResumeViewProps> = ({
   const successTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const pendingRetryRef = React.useRef<boolean>(false);
   const isMountedRef = React.useRef<boolean>(true);
+  const aiRequestIdRef = React.useRef(0);
+  const aiAbortControllerRef = React.useRef<AbortController | null>(null);
 
   useEffect(() => {
     setResume(data);
@@ -65,6 +67,8 @@ const ResumeView: React.FC<ResumeViewProps> = ({
         clearTimeout(successTimeoutRef.current);
         successTimeoutRef.current = null;
       }
+      aiAbortControllerRef.current?.abort();
+      aiAbortControllerRef.current = null;
       // Note: Don't call setState in cleanup - component is unmounting
       // Drag state will be garbage collected automatically
     };
@@ -563,6 +567,10 @@ const ResumeView: React.FC<ResumeViewProps> = ({
     }
     lastAiRequestRef.current = now;
 
+    const requestId = ++aiRequestIdRef.current;
+    aiAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    aiAbortControllerRef.current = abortController;
     setIsAiProcessing(true);
     setAiError("");
     setAiSuccess(false);
@@ -576,9 +584,10 @@ const ResumeView: React.FC<ResumeViewProps> = ({
         resume,
         currentPrompt,
         context,
+        abortController.signal,
       );
 
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current || requestId !== aiRequestIdRef.current) return;
 
       // Check if component is still mounted before updating state
       setResume(updatedResume);
@@ -598,7 +607,7 @@ const ResumeView: React.FC<ResumeViewProps> = ({
         successTimeoutRef.current = null;
       }, 3000);
     } catch (error: any) {
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current || requestId !== aiRequestIdRef.current) return;
       console.error("AI Update failed", error);
       let errorMsg = "Failed to update resume. Please try again.";
 
@@ -625,8 +634,9 @@ const ResumeView: React.FC<ResumeViewProps> = ({
 
       setAiError(errorMsg);
     } finally {
-      if (isMountedRef.current) {
+      if (isMountedRef.current && requestId === aiRequestIdRef.current) {
         setIsAiProcessing(false);
+        aiAbortControllerRef.current = null;
       }
     }
   };
@@ -1018,6 +1028,23 @@ const ResumeView: React.FC<ResumeViewProps> = ({
           >
             {isAiProcessing ? "Refining..." : "AI Refine"}
           </button>
+          {isAiProcessing && (
+            <button
+              type="button"
+              onClick={() => {
+                // The SDK request may still finish in the background, but its
+                // response is ignored and the editor is immediately usable.
+                aiRequestIdRef.current += 1;
+                aiAbortControllerRef.current?.abort();
+                aiAbortControllerRef.current = null;
+                setIsAiProcessing(false);
+                setAiError("Refinement cancelled.");
+              }}
+              className="px-4 py-2 border border-[#3e4559] text-[#a0a09a] hover:text-white text-sm"
+            >
+              Cancel
+            </button>
+          )}
         </form>
         {aiSuccess && (
           <div className="text-xs text-[#768068] flex items-center gap-1.5">

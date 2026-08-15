@@ -332,6 +332,48 @@ const parsePackageJson = (content: string): {
   }
 };
 
+// Package names are implementation details, not a résumé technology stack.
+// Convert detected dependencies, languages, and README mentions into concise,
+// recruiter-recognizable technology names.
+const summarizeTechnologies = (values: unknown[]): string[] => {
+  const source = values
+    .filter((value): value is string => typeof value === 'string')
+    .map(value => value.toLowerCase());
+  const has = (...patterns: RegExp[]) => patterns.some(pattern => source.some(value => pattern.test(value)));
+  const technologies: Array<[string, RegExp[]]> = [
+    ['TypeScript', [/\btypescript\b/, /(^|[-_/])ts($|[-_/])/]],
+    ['JavaScript', [/\bjavascript\b/]],
+    ['Python', [/\bpython\b/, /^django$/, /^flask$/, /^fastapi$/]],
+    ['React Native', [/react-native/, /@react-native/]],
+    ['Expo', [/(^|[-_/])expo($|[-_/])/, /@expo/]],
+    ['React.js', [/^react$/, /^react-dom$/, /react\.js/]],
+    ['Next.js', [/next\.js/, /^next$/]],
+    ['Node.js', [/node\.js/, /^node$/]],
+    ['Express.js', [/^express$/, /express\.js/]],
+    ['Fastify', [/fastify/]],
+    ['Prisma', [/prisma/]],
+    ['PostgreSQL', [/postgres/]],
+    ['MongoDB', [/mongodb|mongoose/]],
+    ['Redis', [/redis/]],
+    ['LibSQL', [/libsql/]],
+    ['Turso', [/turso/]],
+    ['Google Gemini AI', [/generative-ai|gemini/]],
+    ['OpenAI API', [/openai/]],
+    ['Tailwind CSS', [/tailwind/]],
+    ['Vite', [/vite/]],
+    ['Zod', [/^zod$/]],
+    ['Docker', [/docker/]],
+    ['Amazon Web Services (AWS)', [/\baws\b|amazon web services/]],
+    ['Firebase', [/firebase/]],
+    ['Supabase', [/supabase/]],
+  ];
+
+  return technologies
+    .filter(([, patterns]) => has(...patterns))
+    .map(([name]) => name)
+    .slice(0, 8);
+};
+
 // Parse requirements.txt to extract dependencies with validation
 const parseRequirementsTxt = (content: string): string[] => {
   if (!content || content.length > 100000) { // 100KB limit
@@ -889,8 +931,9 @@ export const enrichRepoData = async (
             // ML/Data Science indicators
             isMLProject: notebookData.isML,
             isDataScience: notebookData.isDataScience,
-            // Combine all tech stack info from all ecosystems (limit to prevent memory issues)
-            detectedTechnologies: [
+            // Expose a concise technology stack to the résumé generator rather
+            // than raw npm/Python package names such as @expo/vector-icons.
+            detectedTechnologies: summarizeTechnologies([
               ...(packageData?.dependencies || []),
               ...(packageData?.devDependencies || []),
               ...pythonDeps,
@@ -903,7 +946,8 @@ export const enrichRepoData = async (
               ...cppDeps,
               ...notebookData.imports,
               ...readmeData.mentions,
-            ].filter((v, i, a) => a.indexOf(v) === i).slice(0, 200), // Unique, max 200
+              ...Object.keys(languages),
+            ]),
           },
         };
       } catch (error) {

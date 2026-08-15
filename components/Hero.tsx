@@ -222,8 +222,45 @@ const Hero: React.FC<HeroProps> = ({
       if (abortController.signal.aborted) return;
 
       // Use Gemini AI to parse the PDF directly
-      const { GoogleGenAI } = await import("@google/genai");
+      const { GoogleGenAI, Type } = await import("@google/genai");
       const genAI = new GoogleGenAI({ apiKey: geminiApiKey.trim() });
+
+      const pdfResumeSchema = {
+        type: Type.OBJECT,
+        properties: {
+          fullName: { type: Type.STRING },
+          title: { type: Type.STRING },
+          email: { type: Type.STRING },
+          phone: { type: Type.STRING },
+          location: { type: Type.STRING },
+          linkedinUrl: { type: Type.STRING },
+          githubUrl: { type: Type.STRING },
+          website: { type: Type.STRING },
+          education: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
+            institution: { type: Type.STRING }, degree: { type: Type.STRING },
+            location: { type: Type.STRING }, period: { type: Type.STRING },
+          } } },
+          certifications: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
+            name: { type: Type.STRING }, issuer: { type: Type.STRING }, date: { type: Type.STRING },
+            credentialId: { type: Type.STRING }, credentialUrl: { type: Type.STRING },
+          } } },
+          experience: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
+            company: { type: Type.STRING }, title: { type: Type.STRING }, period: { type: Type.STRING },
+            description: { type: Type.ARRAY, items: { type: Type.STRING } },
+          } } },
+          projects: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
+            name: { type: Type.STRING }, description: { type: Type.ARRAY, items: { type: Type.STRING } },
+            technologies: { type: Type.ARRAY, items: { type: Type.STRING } }, url: { type: Type.STRING },
+            homepage: { type: Type.STRING }, stars: { type: Type.NUMBER },
+          } } },
+          skills: { type: Type.OBJECT, properties: {
+            languages: { type: Type.ARRAY, items: { type: Type.STRING } },
+            frameworks: { type: Type.ARRAY, items: { type: Type.STRING } },
+            tools: { type: Type.ARRAY, items: { type: Type.STRING } },
+          } },
+        },
+        required: ["fullName", "title", "skills", "education", "experience", "projects"],
+      };
 
       const prompt = `
 Extract all information from this resume PDF and transform it into ATS-optimized structured JSON data.
@@ -244,6 +281,15 @@ Return ONLY valid JSON matching this structure:
       "degree": "string",
       "location": "string",
       "period": "string (e.g. Sep 2018 - May 2022)"
+    }
+  ],
+  "certifications": [
+    {
+      "name": "string",
+      "issuer": "string",
+      "date": "string",
+      "credentialId": "string",
+      "credentialUrl": "string"
     }
   ],
   "experience": [
@@ -297,6 +343,8 @@ STRICT ATS OPTIMIZATION RULES:
           },
         ],
         config: {
+          responseMimeType: "application/json",
+          responseSchema: pdfResumeSchema,
           temperature: 0.1,
           abortSignal: abortController.signal,
         },
@@ -389,6 +437,14 @@ STRICT ATS OPTIMIZATION RULES:
             degree: cleanString(e?.degree),
             location: cleanString(e?.location),
             period: cleanString(e?.period)
+          })),
+          certifications: (Array.isArray(data.certifications) ? data.certifications : []).map((cert: any) => ({
+            ...cert,
+            name: cleanString(cert?.name),
+            issuer: cleanString(cert?.issuer),
+            date: cleanString(cert?.date),
+            credentialId: cleanString(cert?.credentialId),
+            credentialUrl: typeof cert?.credentialUrl === "string" ? cert.credentialUrl.trim() : "",
           })),
           experience: (Array.isArray(data.experience) ? data.experience : []).map((exp: any) => ({
             ...exp,

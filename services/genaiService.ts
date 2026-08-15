@@ -11,27 +11,6 @@ const generateId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 };
 
-const AI_REFINEMENT_TIMEOUT_MS = 45_000;
-
-const withTimeout = async <T>(operation: Promise<T>, timeoutMs: number): Promise<T> => {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(
-          () => reject(new Error('AI refinement timed out after 45 seconds. Please try again.')),
-          timeoutMs,
-        );
-      }),
-    ]);
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
-  }
-};
-
-
-
 const resumeSchema: Schema = {
   type: Type.OBJECT,
   properties: {
@@ -84,7 +63,7 @@ const resumeSchema: Schema = {
     },
     projects: {
       type: Type.ARRAY,
-      description: "Exactly 2 to 3 most impressive, high-impact technical projects. Limit this section strictly to keep the entire resume on a single page.",
+      description: "Exactly 3 most impressive, verified technical products when at least 3 exist; otherwise include every verified project available. Keep this section suitable for a single-page resume.",
       items: {
         type: Type.OBJECT,
         properties: {
@@ -93,7 +72,7 @@ const resumeSchema: Schema = {
           description: {
             type: Type.ARRAY,
             items: { type: Type.STRING },
-            description: "1 to 2 concise, ATS-optimized bullet points (max 120 characters each) starting with strong action verbs. Follow Google XYZ formula (Accomplished [X] as measured by [Y], by doing [Z])."
+            description: "Exactly 1 concise, ATS-optimized bullet point (max 160 characters) starting with a strong action verb. Use a verified outcome when available; otherwise state the factual implementation."
           },
           technologies: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Key technologies used (3-6 canonical names)" },
           url: { type: Type.STRING, description: "Repository or live URL" },
@@ -142,6 +121,9 @@ const resumeUpdateSchema: Schema = {
 // Helper to sort and format repos for context
 const formatReposForContext = (repos: GitHubRepo[], limit: number = 50) => {
   if (!repos || repos.length === 0) return [];
+  const hasCalculatedScores = repos.some(repo =>
+    typeof (repo as EnrichedRepoData).calculatedScore === 'number',
+  );
 
   return repos
     .map(r => {
@@ -174,7 +156,10 @@ const formatReposForContext = (repos: GitHubRepo[], limit: number = 50) => {
       // Penalize forked repos in pre-sorting to prioritize original work
       const forkPenalty = r.fork ? -20000 : 0;
 
-      const sortScore = (stars * 10000) + (forks * 2000) + Math.min(size, 50000) + recencyScore + forkPenalty;
+      const calculatedScore = (r as EnrichedRepoData).calculatedScore;
+      const sortScore = hasCalculatedScores && typeof calculatedScore === 'number'
+        ? calculatedScore
+        : (stars * 10000) + (forks * 2000) + Math.min(size, 50000) + recencyScore + forkPenalty;
 
       return {
         ...r,
@@ -282,7 +267,12 @@ export const generateResumeFromGithub = async (
   }
 
   const genAI = new GoogleGenAI({ apiKey: trimmedApiKey });
-  const relevantRepos = formatReposForContext(repos, GITHUB_API.TOP_REPOS_FOR_INITIAL);
+  // Keep the initial context aligned with the contribution-aware scorer rather
+  // than re-ranking raw repositories by stars.
+  const relevantRepos = formatReposForContext(
+    enrichedRepos.length > 0 ? enrichedRepos : repos,
+    GITHUB_API.TOP_REPOS_FOR_INITIAL,
+  );
   const projectCandidates = groupReposIntoProjects(
     enrichedRepos.length > 0 ? enrichedRepos : repos,
   );
@@ -357,6 +347,7 @@ TASK: Generate an ATS-optimized, professional resume JSON.
    - Canonical names: Use "React.js" (not "Reactjs"), "Node.js", "TypeScript", "JavaScript" (not "JS").
 4. STANDARD ATS DATE FORMAT: Use standard dates: "Jan 2023 - Present", "Aug 2021 - Dec 2023", or "2020 - 2022". Never relative dates like "recently".
 5. KEYWORD DENSITY ALIGNMENT: Ensure technologies listed in Technical Skills or Project technologies appear naturally within Experience and Project bullet points.
+6. TECHNOLOGY DISCIPLINE: List only 3-6 high-level, canonical technologies per project (for example React Native, Expo, TypeScript, MongoDB). Never list raw package names, scoped npm packages, icon libraries, hooks, or utilities. Describe what the product does and its user-facing or technical outcome; do not turn the bullet into a dependency list.
 
 === ATS ACTION VERB ENFORCEMENT & GOOGLE XYZ FORMULA (CRITICAL) ===
 1. Start EVERY bullet point with a strong, high-impact past-tense ATS Action Verb (or present tense for current position).
@@ -380,8 +371,8 @@ TASK: Generate an ATS-optimized, professional resume JSON.
 === STRICT ONE-PAGE CONSTRAINT & CONCISENESS ===
 To keep the resume concise (actual pagination depends on the user's printer, font, and paper size):
 1. Include only professional experience explicitly present in LinkedIn/additional context. Do not invent an "Open Source Contributor" role or any other fallback experience.
-2. LIMIT projects (Projects section) to 1-3 verified projects based on supplied repository data. Require 2 or 3 projects ONLY when supported by verified candidate sources; do NOT invent unsupported projects.
-3. Every bullet point MUST be highly concise (maximum 120 characters per bullet) and fit on a single line when rendered. Avoid wordy explanations, narrative paragraphs, or filler.
+2. Select exactly 3 verified projects when at least 3 candidates exist; otherwise include every verified candidate. Do NOT invent unsupported projects.
+3. Every project MUST have exactly 1 concise bullet (maximum 160 characters). Keep each experience role to 1-2 concise bullets. Avoid wordy descriptions, narrative paragraphs, or filler.
 4. Focus heavily on What was done, What technologies/libraries/tools were used, and What the measurable outcome/metric was.
 5. Do not duplicate information between sections.
 
@@ -398,7 +389,7 @@ Use clear, concrete language matched to the candidate's demonstrated scope. Do n
 2. EDUCATION: Extract ONLY from LinkedIn text or GitHub bio (DO NOT fabricate). Limit to top 1-2 entries.
 3. CERTIFICATIONS & LICENSES: Extract from LinkedIn text (DO NOT fabricate). Limit to top 2-3 items.
 4. EXPERIENCE: Extract only from LinkedIn/additional context. If none is supplied, return an empty array. Use 1 to 2 factual bullets per role (max 120 characters each).
-5. PROJECTS: Select 1 to 3 verified projects. Require 2 or 3 projects ONLY when supported by verified repository data; prohibit inventing unsupported projects.
+5. PROJECTS: Select exactly 3 verified projects when available; prohibit inventing unsupported projects.
 6. TECHNICAL SKILLS: Categorize into Languages, Frameworks, and Tools. Format as clean array lists.
 7. PROJECT PRIORITY: Select projects from PREFERRED PROJECT CANDIDATES, in rank order. The repositories field lists component roles (for example web, API, worker, mobile, or shared package). A candidate with multiple repositories is one product: use one project slot, combine the verified stack across its components, and never list its component repositories separately. Do not choose a lower-ranked project solely because it has more stars.
 
@@ -602,8 +593,8 @@ export const sanitizeAtsData = (data: ResumeData): ResumeData => {
     projects: (Array.isArray(data.projects) ? data.projects : []).map(p => ({
       ...p,
       name: cleanAtsText(p?.name).slice(0, 120),
-      technologies: ensureArray(p?.technologies, 8, 60),
-      description: ensureArray(p?.description, 2, 120),
+      technologies: ensureArray(p?.technologies, 6, 60),
+      description: ensureArray(p?.description, 1, 160),
       // Never expose a private repository or its live URL in a public resume.
       url: p?.isPrivate ? '' : (typeof p?.url === 'string' ? p.url.trim() : ''),
       homepage: p?.isPrivate ? '' : (typeof p?.homepage === 'string' ? p.homepage.trim() : '')
@@ -661,7 +652,8 @@ export const updateResumeWithAI = async (
   apiKey: string,
   currentResume: ResumeData,
   userPrompt: string,
-  context: { user: GitHubUser; repos: GitHubRepo[]; enrichedRepos: EnrichedRepoData[]; linkedinText: string }
+  context: { user: GitHubUser; repos: GitHubRepo[]; enrichedRepos: EnrichedRepoData[]; linkedinText: string },
+  signal?: AbortSignal,
 ): Promise<ResumeData> => {
   if (!apiKey || apiKey.trim().length === 0) {
     throw new Error('Gemini API Key is required.');
@@ -742,15 +734,18 @@ Return exactly one object in this shape: { "changes": { ... } }.
 
   let response;
   try {
-    response = await withTimeout(genAI.models.generateContent({
-      model: 'gemini-3.5-flash',
+    response = await genAI.models.generateContent({
+      // Refinement produces a small structured patch; use the low-latency model
+      // rather than the heavier full-resume generation model.
+      model: 'gemini-3.5-flash-lite',
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
         responseSchema: resumeUpdateSchema,
         temperature: 0.3,
+        abortSignal: signal,
       }
-    }), AI_REFINEMENT_TIMEOUT_MS);
+    });
   } catch (apiError: any) {
     console.error('AI API call failed:', apiError);
     if (apiError?.message?.includes('quota') || apiError?.message?.includes('rate limit')) {
