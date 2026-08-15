@@ -1240,6 +1240,21 @@ const ResumeView: React.FC<ResumeViewProps> = ({
           </header>
 
           {sectionOrder.map((sectionKey) => {
+            // Empty-section placeholders read poorly to both recruiters and ATS
+            // parsers. Keep them available while editing, but omit them from the
+            // published/PDF resume entirely.
+            const isEmptySection =
+              (sectionKey === "education" && !resume.education?.length) ||
+              (sectionKey === "certifications" && !resume.certifications?.length) ||
+              (sectionKey === "experience" && !resume.experience?.length) ||
+              (sectionKey === "projects" && !resume.projects?.length) ||
+              (sectionKey === "skills" &&
+                !resume.skills?.languages?.length &&
+                !resume.skills?.frameworks?.length &&
+                !resume.skills?.tools?.length);
+
+            if (!isEditing && isEmptySection) return null;
+
             if (sectionKey === "education") {
               return (
                 <section

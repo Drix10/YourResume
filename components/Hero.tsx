@@ -6,6 +6,7 @@ interface HeroProps {
     githubToken: string,
     geminiApiKey: string,
     linkedinText: string,
+    includePrivateRepoData: boolean,
   ) => void;
   onImportResume: (resumeData: any) => void;
   state: AppState;
@@ -21,6 +22,7 @@ const Hero: React.FC<HeroProps> = ({
   const [githubToken, setGithubToken] = useState("");
   const [geminiApiKey, setGeminiApiKey] = useState("");
   const [linkedinText, setLinkedinText] = useState("");
+  const [includePrivateRepoData, setIncludePrivateRepoData] = useState(false);
 
   const [formError, setFormError] = useState("");
   const [showGithubToken, setShowGithubToken] = useState(false);
@@ -503,7 +505,12 @@ STRICT ATS OPTIMIZATION RULES:
 
     // Basic sanitization - remove any HTML tags from LinkedIn text
     const sanitizedLinkedin = linkedinText.replace(/<[^>]*>/g, "");
-    onStart(trimmedGithubToken, trimmedGeminiKey, sanitizedLinkedin);
+    onStart(
+      trimmedGithubToken,
+      trimmedGeminiKey,
+      sanitizedLinkedin,
+      includePrivateRepoData,
+    );
   };
 
   const isLoading =
@@ -708,6 +715,20 @@ STRICT ATS OPTIMIZATION RULES:
                   {linkedinText.length.toLocaleString()} / 50,000 characters
                 </p>
               </div>
+
+              <label className="flex items-start gap-2 text-xs text-[#a0a09a] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includePrivateRepoData}
+                  onChange={(e) => setIncludePrivateRepoData(e.target.checked)}
+                  disabled={isLoading}
+                  className="mt-0.5"
+                />
+                <span>
+                  Include private repository metadata in AI analysis. This may send
+                  README and dependency details to Gemini.
+                </span>
+              </label>
 
               <button
                 type="submit"

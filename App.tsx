@@ -37,6 +37,7 @@ const App: React.FC = () => {
     githubToken: string,
     geminiApiKey: string,
     linkedinText: string,
+    includePrivateRepoData: boolean,
   ) => {
     // Prevent double-submission
     if (isGeneratingRef.current) {
@@ -58,11 +59,23 @@ const App: React.FC = () => {
         throw new Error("No repositories found.");
       }
 
-      // 3. Enrich top 20 repos with deep analysis (package.json, README, commits, etc.)
+      // Keep private repository metadata local unless the candidate explicitly
+      // permits it to be sent to the AI provider.
+      const reposForAi = includePrivateRepoData
+        ? repos
+        : repos.filter((repo) => !repo.private);
+
+      if (reposForAi.length === 0) {
+        throw new Error(
+          "No public repositories found. Enable private repository analysis only if you consent to sharing that metadata with the AI provider.",
+        );
+      }
+
+      // 3. Enrich top 20 eligible repos with deep analysis (package.json, README, commits, etc.)
       // Pass username to track user's actual contributions
       const enrichedRepos = await enrichRepoData(
         githubToken,
-        repos,
+        reposForAi,
         user.login,
         20,
       );
@@ -72,7 +85,7 @@ const App: React.FC = () => {
 
       setContextData({
         user,
-        repos,
+        repos: reposForAi,
         enrichedRepos: scoredRepos,
         linkedinText,
         geminiApiKey,
@@ -83,7 +96,7 @@ const App: React.FC = () => {
       const generatedResume = await generateResumeFromGithub(
         geminiApiKey,
         user,
-        repos,
+        reposForAi,
         scoredRepos,
         linkedinText,
       );
