@@ -4,7 +4,7 @@
 
 ![React](https://img.shields.io/badge/React-19.2-blue?logo=react)
 ![Vite](https://img.shields.io/badge/Vite-6.2-purple?logo=vite)
-![Gemini AI](https://img.shields.io/badge/Gemini-2.5%20Flash-green?logo=google)
+![Gemini AI](https://img.shields.io/badge/Gemini-3.5%20Flash-green?logo=google)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue?logo=typescript)
 
 ---
