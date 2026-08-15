@@ -128,19 +128,19 @@
   }
 
   /* Compact mode for dense resumes */
-  .resume-compact .resume-page,
-  .resume-ultra-compact .resume-page {
+  .resume-page.resume-compact,
+  .resume-page.resume-ultra-compact {
     font-size: 9pt !important;
     line-height: 1.2 !important;
   }
 
-  .resume-compact .resume-page h1,
-  .resume-ultra-compact .resume-page h1 {
+  .resume-page.resume-compact h1,
+  .resume-page.resume-ultra-compact h1 {
     font-size: 18pt !important;
   }
 
-  .resume-compact .resume-page h2,
-  .resume-ultra-compact .resume-page h2 {
+  .resume-page.resume-compact h2,
+  .resume-page.resume-ultra-compact h2 {
     font-size: 9pt !important;
   }
 
